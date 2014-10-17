@@ -1,7 +1,6 @@
 from collections import namedtuple
 from functools import partial
 import numpy as np
-from hdf5able import HDF5able
 
 from menpo.image import BooleanImage
 from menpo.transform import Transform, AlignmentSimilarity, ThinPlateSplines
@@ -158,7 +157,7 @@ FlattenRasterizerResult = namedtuple('FlattenRasterizerResult',
                                      'rgb_image shape_image')
 
 
-class FlattenRasterizer(HDF5able):
+class FlattenRasterizer(object):
 
     def __init__(self, sparse_template_3d, transform=None,
                  image_width=1000, clip_space_scale=0.8):
@@ -238,7 +237,7 @@ LandmarkAligningFRResult = namedtuple('AligningFRResult',
                                        'shape_image'])
 
 
-class AligningFR(HDF5able):
+class AligningFR(object):
 
     def __init__(self, flatten_rasterizer):
         self.fr = flatten_rasterizer
