@@ -11,9 +11,9 @@ from menpo3d.rasterize import (GLRasterizer, model_to_clip_transform,
 from menpo3d.unwrap import optimal_cylindrical_unwrap
 
 
-class FlattenInterpolater(Transform):
+class FlattenInterpolator(Transform):
     r"""
-    Class for bringing landmarked :map:`TriMesh` instances into dense
+    Bring landmarked :map:`TriMesh` instances into dense
     correspondence by flattening the mesh into a 2D space.
 
     Parameters
@@ -23,30 +23,30 @@ class FlattenInterpolater(Transform):
         The sparse target that input :map:`TriMesh` landmarks will be
         aligned against
 
-    flatten : :map:`Transform`
+    flattener : :map:`Transform`
         :map:`Transform` that will serve to flatten the mesh into a 2D
-        space. If None probided, an optoimal cylindrical unwrap for target
+        space. If None provided, an optimal cylindrical unwrap for target
         will be used.
 
-    interp : :map:`Alignment`
+    interpolator : :map:`Alignment`
         The 2D alignment that should be used to interpolate the flattened
         meshes.
 
     """
-    def __init__(self, tgt, transform=None, interp=ThinPlateSplines):
-        # Transform to flatten the mesh ready for interpolation
-        if transform is None:
-            transform = optimal_cylindrical_unwrap(tgt)
-        self.flattener = transform
-        self.interpolator = interp
+    def __init__(self, sparse_template_3d, flattener=None,
+                 interpolator=ThinPlateSplines):
+        if flattener is None:
+            flattener = optimal_cylindrical_unwrap(sparse_template_3d)
+        self.flattener = flattener
+        self.interpolator = interpolator
         # Save out the rigid target
-        self.tgt = tgt
+        self.sparse_template_3d = sparse_template_3d
         # Prepare the 2D/3d flattened targets
-        self.f_tgt_3d = self.flattener.apply(tgt)
+        self.f_tgt_3d = self.flattener.apply(sparse_template_3d)
         self.dims_3to2, self.dims_2to3 = dims_3to2(), dims_2to3()
         self.f_tgt_2d = self.dims_3to2.apply(self.f_tgt_3d)
 
-    def _apply(self, x, group=None, label='all'):
+    def _apply(self, x, group=None, label=None):
         r"""
         Return a version of the mesh that has been flattened and interpolated
         to be aligned with the target of this :map:`FlattenInterp`.
@@ -80,9 +80,14 @@ class FlattenInterpolater(Transform):
         f_2d = self.dims_3to2.apply(f_3d)
 
         # 3. Warp the 2D flatted target to be in dense correspondence
-        w_2d = self.interpolator(f_2d.landmarks[group][label],
-                                 self.f_tgt_2d).apply(f_2d)
-
+        try:
+            w_2d = self.interpolator(f_2d.landmarks[group][label],
+                                     self.f_tgt_2d).apply(f_2d)
+        except Exception as e:
+            e.f_3d = f_3d
+            e.f_2d = f_2d
+            e.f_tgt_2d = self.f_tgt_2d
+            raise e
         # 4. Append on the Z dim + set it to what it was in the flattened case
         w_3d = self.dims_2to3.apply(w_2d)
         w_3d.points[:, 2] = f_3d.points[:, 2]
@@ -159,11 +164,11 @@ FlattenRasterizerResult = namedtuple('FlattenRasterizerResult',
 
 class FlattenRasterizer(object):
 
-    def __init__(self, sparse_template_3d, transform=None,
+    def __init__(self, sparse_template_3d, flattener=None,
                  image_width=1000, clip_space_scale=0.8):
-        if transform is None:
-            transform = optimal_cylindrical_unwrap(sparse_template_3d)
-        self.transform = transform
+        if flattener is None:
+            flattener = optimal_cylindrical_unwrap(sparse_template_3d)
+        self.transform = flattener
         self.sparse_template_3d = sparse_template_3d
         test_points = sparse_template_3d.copy()
         test_points.landmarks['test_flatten'] = test_points
@@ -232,9 +237,8 @@ class FlattenRasterizer(object):
                                              per_vertex_f3v=mesh.points))
 
 
-LandmarkAligningFRResult = namedtuple('AligningFRResult',
-                                      ['sparse_3d', 'rgb_image',
-                                       'shape_image'])
+AligningFRResult = namedtuple('AligningFRResult',
+                              ['sparse_3d', 'rgb_image', 'shape_image'])
 
 
 class AligningFR(object):
@@ -260,8 +264,19 @@ class LandmarkAligningFR(AligningFR):
         aligned_mesh = AlignmentSimilarity(mesh.landmarks[group][label],
                                            self.sparse_template_3d).apply(mesh)
         fi_result = self.fr(aligned_mesh, group=group, label=label)
-        return LandmarkAligningFRResult(aligned_mesh.landmarks[group][label],
-                                        *fi_result)
+        return AligningFRResult(aligned_mesh.landmarks[group][label],
+                                *fi_result)
+
+
+class PartialLandmarkAligningFR(AligningFR):
+
+    def __call__(self, mesh, mask, group=None, label=None):
+        aligned_mesh = AlignmentSimilarity(
+            mesh.landmarks[group][label],
+            self.sparse_template_3d.from_mask(mask)).apply(mesh)
+        fi_result = self.fr(aligned_mesh)
+        return AligningFRResult(aligned_mesh.landmarks[group][label],
+                                *fi_result)
 
 
 def warp_to_template(template, image, transform=ThinPlateSplines,

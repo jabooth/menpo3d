@@ -1,2 +1,2 @@
-from .flatinterp import (FlattenInterpolater, FlattenRasterizer,
+from .flatinterp import (FlattenInterpolator, FlattenRasterizer,
                          LandmarkAligningFRWithInterpolation, AligningFR)
