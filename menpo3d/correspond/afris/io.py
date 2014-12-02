@@ -39,11 +39,15 @@ metadata_dir = lambda r: r / 'metadata'
 
 afr_path = lambda r, compress=False: r / ('afr' +
                                           suffix_for_compress(compress))
+
+template_image_path = lambda r, compress=False: r / ('template_image' +
+                                                     suffix_for_compress(compress))
 shape_path = generate_path(shape_dir)
 texture_path = generate_path(texture_dir)
 metadata_path = generate_path(metadata_dir)
 
 load_afr, dump_afr = generate_load_and_dump(afr_path, with_id=False)
+load_template_image, dump_template_image = generate_load_and_dump(template_image_path, with_id=False)
 load_shape, dump_shape = generate_load_and_dump(shape_path)
 load_texture, dump_texture = generate_load_and_dump(texture_path)
 load_metadata, dump_metadata = generate_load_and_dump(metadata_path)
@@ -67,3 +71,8 @@ def dump_lafr_result(x, r, id_, compress=True):
     dump_metadata({'sparse_3d': x.sparse_3d}, r, id_, compress=compress)
     dump_shape(x.shape_image, r, id_, compress=compress)
     dump_texture(x.texture_image, r, id_, compress=compress)
+
+
+def dump_afr_and_template_image(afr, r, compress=True):
+    dump_afr(afr, r, compress=compress)
+    dump_template_image(afr.template_image(), r, compress=compress)

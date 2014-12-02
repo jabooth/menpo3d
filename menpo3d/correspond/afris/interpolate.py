@@ -9,8 +9,8 @@ def interpolate_to_template(template_image, transform, image,
                                                       transform)
 
 
-def pwa_interpolate_for_flatten_rasterize(fr, group=None, label=None):
-    template_image = fr.template_image()
+def pwa_interpolate_for_flatten_rasterize(template_image,
+                                          group=None, label=None):
     template_image.constrain_to_landmarks(group=group, label=label)
     pwa = PiecewiseAffine(template_image.landmarks[group][label],
                           template_image.landmarks[group][label])
