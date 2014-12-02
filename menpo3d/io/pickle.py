@@ -20,7 +20,8 @@ def pickle_load(path):
         try:
             x.path = Path(path)
         except AttributeError:
-            x['path'] = Path(path)
+            if not 'path' in x:
+                x['path'] = Path(path)
     return x
 
 
