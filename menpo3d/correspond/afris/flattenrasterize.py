@@ -1,14 +1,9 @@
-from collections import namedtuple
 from functools import partial
 import numpy as np
 from menpo.image import BooleanImage
 from menpo3d.rasterize import (GLRasterizer, model_to_clip_transform,
                                dims_3to2)
 from menpo3d.unwrap import optimal_cylindrical_unwrap
-
-
-FlattenRasterizeResult = namedtuple('FlattenRasterizeResult',
-                                    ['texture_image', 'shape_image'])
 
 
 class FlattenRasterize(object):
@@ -81,9 +76,10 @@ class FlattenRasterize(object):
         if f_mesh.n_tris != f_mesh_pruned.n_tris:
             print('removed {} problematic triangles'.format(
                 f_mesh.n_tris - f_mesh_pruned.n_tris))
-        return FlattenRasterizeResult(
-            *self.rasterizer.rasterize_mesh_with_f3v_interpolant(
-                f_mesh_pruned, per_vertex_f3v=mesh.points))
+        texture, shape = self.rasterizer.rasterize_mesh_with_f3v_interpolant(
+            f_mesh_pruned, per_vertex_f3v=mesh.points)
+        return {'texture_image': texture,
+                'shape_image': shape}
 
 
 tri_in_set = lambda tl, s: np.in1d(tl.ravel(), s).reshape([-1, 3]).any(axis=1)

@@ -17,7 +17,10 @@ def pickle_load(path):
     with o(str(path), 'rb') as f:
         x = pickle.load(f)
     if not hasattr(x, 'path'):
-        x.path = Path(path)
+        try:
+            x.path = Path(path)
+        except AttributeError:
+            x['path'] = Path(path)
     return x
 
 

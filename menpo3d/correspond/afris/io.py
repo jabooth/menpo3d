@@ -67,10 +67,12 @@ def prepare_afr(r):
         metadata.mkdir()
 
 
-def dump_lafr_result(x, r, id_, compress=True):
-    dump_metadata({'sparse_3d': x.sparse_3d}, r, id_, compress=compress)
-    dump_shape(x.shape_image, r, id_, compress=compress)
-    dump_texture(x.texture_image, r, id_, compress=compress)
+def dump_afr_result(x, r, id_, compress=True):
+    x = x.copy()  # copy the dict so we don't damage the input one
+    dump_shape(x.pop('shape_image'), r, id_, compress=compress)
+    dump_texture(x.pop('texture_image'), r, id_, compress=compress)
+    # whatever is left is metadata
+    dump_metadata(x, r, id_, compress=compress)
 
 
 def dump_afr_and_template_image(afr, r, compress=True):
