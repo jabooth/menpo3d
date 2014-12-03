@@ -1,22 +1,23 @@
 from functools import partial
-from menpo3d.io import pickle_load, pickle_dump
-from menpo3d.io.pickle import suffix_for_compress
+from menpo.io import import_pickle, export_pickle
+
+suffix_for_c = lambda compress: '.pkl.gz' if compress else '.pkl'
 
 
 def pickle_dump_with_path_with_id(path_f, x, r, id_, compress=True):
-    return pickle_dump(x, path_f(r, id_, compress=compress), compress=compress)
+    return export_pickle(x, path_f(r, id_, compress=compress), overwrite=True)
 
 
 def pickle_load_with_path_with_id(path_f, r, id_, compress=True):
-    return pickle_load(path_f(r, id_, compress=compress))
+    return import_pickle(path_f(r, id_, compress=compress))
 
 
 def pickle_dump_with_path(path_f, x, r, compress=True):
-    return pickle_dump(x, path_f(r, compress=compress), compress=compress)
+    return export_pickle(x, path_f(r, compress=compress), overwrite=True)
 
 
 def pickle_load_with_path(path_f, r, compress=True):
-    return pickle_load(path_f(r, compress=compress))
+    return import_pickle(path_f(r, compress=compress))
 
 
 def generate_load_and_dump(path_f, with_id=True):
@@ -29,7 +30,11 @@ def generate_load_and_dump(path_f, with_id=True):
 
 
 def path_for_id(dir_f, r, id_, compress=True):
-    return dir_f(r) / (id_ + suffix_for_compress(compress))
+    return dir_f(r) / (id_ + suffix_for_c(compress))
+
+
+def id_for_path(p):
+    return p.name.split(''.join(p.suffixes))[0]
 
 generate_path = lambda dir_f: partial(path_for_id, dir_f)
 
@@ -38,10 +43,10 @@ texture_dir = lambda r: r / 'texture'
 metadata_dir = lambda r: r / 'metadata'
 
 afr_path = lambda r, compress=False: r / ('afr' +
-                                          suffix_for_compress(compress))
+                                          suffix_for_c(compress))
 
 template_image_path = lambda r, compress=False: r / ('template_image' +
-                                                     suffix_for_compress(compress))
+                                                     suffix_for_c(compress))
 shape_path = generate_path(shape_dir)
 texture_path = generate_path(texture_dir)
 metadata_path = generate_path(metadata_dir)
