@@ -83,3 +83,10 @@ def dump_afr_result(x, r, id_, compress=True):
 def dump_afr_and_template_image(afr, r, compress=True):
     dump_afr(afr, r, compress=compress)
     dump_template_image(afr.template_image(), r, compress=compress)
+
+
+def afr_exists(r, id_):
+    t_path = texture_path(r, id_)
+    s_path = shape_path(r, id_)
+    m_path = metadata_path(r, id_)
+    return t_path.is_file() and s_path.is_file() and m_path.is_file()
