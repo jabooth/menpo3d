@@ -90,3 +90,11 @@ def afr_exists(r, id_):
     s_path = shape_path(r, id_)
     m_path = metadata_path(r, id_)
     return t_path.is_file() and s_path.is_file() and m_path.is_file()
+
+ids_in_dir = lambda r, dir_f: set(id_for_path(p) for p in dir_f(r).glob('*.pkl*'))
+
+
+def complete_afr_ids(r):
+    return sorted(ids_in_dir(r, texture_dir) &
+                  ids_in_dir(r, shape_dir) &
+                  ids_in_dir(r, metadata_dir))
