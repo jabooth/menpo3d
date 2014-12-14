@@ -26,20 +26,25 @@ class AlignFR(object):
 class LandmarkAFR(AlignFR):
 
     def __call__(self, mesh, group=None, label=None):
-        aligned_mesh = AlignmentSimilarity(mesh.landmarks[group][label],
-                                           self.sparse_template_3d).apply(mesh)
+        alignment = AlignmentSimilarity(
+            mesh.landmarks[group][label],
+            self.sparse_template_3d).as_non_alignment()
+        aligned_mesh = alignment.apply(mesh)
         result = self.fr(aligned_mesh, group=group, label=label)
         result['sparse_3d'] = aligned_mesh.landmarks[group][label]
+        result['alignment'] = alignment
         return result
 
 
 class PartialLandmarkAFR(AlignFR):
 
     def __call__(self, mesh, mask, group=None, label=None):
-        aligned_mesh = AlignmentSimilarity(
+        alignment = AlignmentSimilarity(
             mesh.landmarks[group][label],
-            self.sparse_template_3d.from_mask(mask)).apply(mesh)
+            self.sparse_template_3d.from_mask(mask)).as_non_alignment()
+        aligned_mesh = alignment.apply(mesh)
         result = self.fr(aligned_mesh)
         result['sparse_3d'] = aligned_mesh.landmarks[group][label]
+        result['alignment'] = alignment
         result['mask'] = mask
         return result
