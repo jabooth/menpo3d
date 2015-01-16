@@ -1,5 +1,6 @@
+from menpo.shape import PointCloud
 from functools import partial
-from menpo.transform import PiecewiseAffine
+from menpo.transform import PiecewiseAffine, ThinPlateSplines
 
 
 def interpolate_to_template(template_image, transform, image,
@@ -15,6 +16,16 @@ def pwa_interpolate_for_flatten_rasterize(template_image,
     pwa = PiecewiseAffine(template_image.landmarks[group][label],
                           template_image.landmarks[group][label])
     interp = partial(interpolate_to_template, template_image, pwa,
+                     group=group, label=label)
+    return interp
+
+
+def tps_interpolate_for_flatten_rasterize(template_image,
+                                          group=None, label=None):
+    src = template_image.landmarks[group][label]
+    tgt = PointCloud(src.points - 2)  # just deform the points a little
+    tps = ThinPlateSplines(src, tgt)
+    interp = partial(interpolate_to_template, template_image, tps,
                      group=group, label=label)
     return interp
 
