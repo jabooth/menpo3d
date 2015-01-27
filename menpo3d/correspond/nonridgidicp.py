@@ -1,7 +1,46 @@
 import numpy as np
-from scipy.spatial import cKDTree as KDTree
 from scipy.sparse.linalg import spsolve
 import scipy.sparse as sp
+import vtk
+
+
+def build_intersector(mesh):
+    obbTree = vtk.vtkOBBTree()
+    obbTree.SetDataSet(mesh)
+    obbTree.BuildLocator()
+
+    def intersect(source, target):
+        intersections = vtk.vtkPoints()
+        tri_ids = vtk.vtkIdList()
+        code = obbTree.IntersectWithLine(source, target,
+                                         intersections, tri_ids)
+        if code in (1, -1):
+            i_data = intersections.GetData()
+            points = np.array([i_data.GetTuple3(i) for i in range(i_data.GetNumberOfTuples())])
+            ids = np.array([tri_ids.GetId(i) for i in range(tri_ids.GetNumberOfIds())])
+            return points, ids
+        else:
+            return [], []
+
+    return intersect
+
+
+def build_closest_point_locator(mesh):
+    cell_locator = vtk.vtkCellLocator()
+    cell_locator.SetDataSet(mesh)
+    cell_locator.BuildLocator()
+
+    c_point = [0., 0., 0.]
+    cell_id = vtk.mutable(0)
+    sub_id = vtk.mutable(0)
+    distance = vtk.mutable(0.0)
+
+    def closest_point(point):
+        cell_locator.FindClosestPoint(point, c_point,
+                                      cell_id, sub_id, distance)
+        return c_point[:], cell_id.get(), distance.get()
+
+    return closest_point
 
 
 def non_rigid_icp(source, target, eps=1e-3):
@@ -50,9 +89,10 @@ def non_rigid_icp(source, target, eps=1e-3):
 
     M_kron_G_s = sp.kron(M_s, G)
 
-    # build the kD-tree
-    print('building KD-tree for target...')
-    kdtree = KDTree(target.points)
+    # build octree for finding closest points on target.
+    target_vtk = target.to_vtk()
+    print('building nearest point locator for target...')
+    closest_point_on_target = build_closest_point_locator(target_vtk)
 
     # init transformation
     X_prev = np.zeros((n_dims, n_dims + 1))
@@ -84,16 +124,13 @@ def non_rigid_icp(source, target, eps=1e-3):
         # iterate until X converge
         while True:
             # find nearest neighbour
-            match = kdtree.query(v_i)[1]
+            U = np.array([closest_point_on_target(p)[0]
+                          for p in v_i])
 
-            # formulate target and template data, and distance term
-            U = target.points[match, :]
 
             data = np.hstack((v_i.ravel(), o))
             D_s = sp.coo_matrix((data, (row, col)))
 
-            # correspondence detection for setting weight
-            # add distance term
             A_s = sp.vstack((alpha_M_kron_G_s, D_s)).tocsr()
             B_s = sp.vstack((np.zeros((alpha_M_kron_G_s.shape[0], n_dims)),
                              U)).tocsr()
@@ -110,5 +147,6 @@ def non_rigid_icp(source, target, eps=1e-3):
                 break
 
     # final result
-    point_corr = kdtree.query(v_i)[1]
+    point_corr = np.array([closest_point_on_target(p)[0]
+                           for p in v_i])
     return v_i, point_corr
