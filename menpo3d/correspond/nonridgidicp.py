@@ -1,3 +1,4 @@
+from collections import Counter
 import numpy as np
 from scipy.sparse.linalg import spsolve
 import scipy.sparse as sp
@@ -44,23 +45,25 @@ def build_closest_point_locator(mesh):
     return closest_point
 
 
-def non_rigid_icp(source, target, eps=1e-3):
-    r"""
-    Deforms the source trimesh to align with to optimally the target.
-    """
-    n_dims = source.n_dims
-    # Homogeneous dimension (1 extra for translation effects)
-    h_dims = n_dims + 1
-    points = source.points
-    trilist = source.trilist
+def edge_triangles(trilist):
+    # Get a sorted list of edge pairs
+    edge_pairs = np.sort(np.vstack((trilist[:, [0, 1]],
+                                    trilist[:, [0, 2]],
+                                    trilist[:, [1, 2]])))
 
-    # Configuration
-    upper_stiffness = 101
-    lower_stiffness = 1
-    stiffness_step = 5
+    # convert to a tuple per edge pair
+    edges = [tuple(x) for x in edge_pairs]
+    # count the occurrences of the ordered edge pairs - edge pairs that
+    # occur once are at the edge of the whole mesh
+    mesh_edges = (e for e, i in Counter(edges).items() if i == 1)
+    # index back into the edges to find which triangles contain these edges
+    return np.array(list(set(edges.index(e) % trilist.shape[0]
+                             for e in mesh_edges)))
 
-    # Get a sorted list of edge pairs (note there will be many mirrored pairs
-    # e.g. [4, 7] and [7, 4])
+
+def unique_edges(trilist):
+    # Get a sorted list of edge pairs. sort ensures that each edge is ordered
+    # from lowest index to highest.
     edge_pairs = np.sort(np.vstack((trilist[:, [0, 1]],
                                     trilist[:, [0, 2]],
                                     trilist[:, [1, 2]])))
@@ -73,17 +76,38 @@ def non_rigid_icp(source, target, eps=1e-3):
     # Now we can use this view to ask for only unique edges...
     unique_edge_index = np.unique(edge_pair_view, return_index=True)[1]
     # And use that to filter our original list down
-    unique_edge_pairs = edge_pairs[unique_edge_index]
+    return edge_pairs[unique_edge_index]
 
-    # record the number of unique edges and the number of points
-    n = points.shape[0]
+
+def node_arc_incidence_matrix(trilist):
+    unique_edge_pairs = unique_edges(trilist)
     m = unique_edge_pairs.shape[0]
 
     # Generate a "node-arc" (i.e. vertex-edge) incidence matrix.
     row = np.hstack((np.arange(m), np.arange(m)))
     col = unique_edge_pairs.T.ravel()
     data = np.hstack((-1 * np.ones(m), np.ones(m)))
-    M_s = sp.coo_matrix((data, (row, col)))
+    return sp.coo_matrix((data, (row, col)))
+
+
+def non_rigid_icp(source, target, eps=1e-3):
+    r"""
+    Deforms the source trimesh to align with to optimally the target.
+    """
+    n_dims = source.n_dims
+    # Homogeneous dimension (1 extra for translation effects)
+    h_dims = n_dims + 1
+    points, trilist = source.points, source.trilist
+    n = points.shape[0]  # record number of points
+
+    # Configuration
+    upper_stiffness = 101
+    lower_stiffness = 1
+    stiffness_step = 5
+
+    edge_tris = edge_triangles(trilist)
+
+    M_s = node_arc_incidence_matrix(trilist)
 
     # weight matrix
     G = np.identity(n_dims + 1)
@@ -139,6 +163,11 @@ def non_rigid_icp(source, target, eps=1e-3):
 
             u_i_n = target_tri_normals[tri_indicies]
 
+            # are any of the corresponding triangles on the edge of the target?
+            # where they are we return a false weight (we *don't* want to
+            # include these points in the solve)
+            w_i_e = np.in1d(tri_indicies, edge_tris, invert=False)
+
             # calculate the normals of the current v_i
             v_i_n = TriMesh(v_i, trilist=trilist, copy=False).vertex_normals()
 
@@ -147,7 +176,7 @@ def non_rigid_icp(source, target, eps=1e-3):
 
             # Form the overall w_i from the normals, edge case and self
             # intersection
-            w_i = w_i_n
+            w_i = np.logical_or(w_i_n, w_i_e)
 
             # Build the sparse diagonal weight matrix
             W_s = sp.diags(w_i.astype(np.float)[None, :], [0])
