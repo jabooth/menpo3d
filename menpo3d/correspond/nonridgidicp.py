@@ -101,9 +101,9 @@ def non_rigid_icp(source, target, eps=1e-3):
     n = points.shape[0]  # record number of points
 
     # Configuration
-    upper_stiffness = 101
-    lower_stiffness = 1
-    stiffness_step = 5
+    upper_stiffness = 100
+    lower_stiffness = 0.5
+    n_steps = 20
 
     edge_tris = edge_triangles(trilist)
 
@@ -128,7 +128,8 @@ def non_rigid_icp(source, target, eps=1e-3):
 
     # start nicp
     # for each stiffness
-    stiffness = range(upper_stiffness, lower_stiffness, -stiffness_step)
+    stiffness = np.linspace(upper_stiffness, lower_stiffness, n_steps)
+    # stiffness = np.logspace(2, 0.01, 100) - 1
     errs = []
 
 
