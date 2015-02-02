@@ -129,6 +129,7 @@ def non_rigid_icp(source, target, eps=1e-3):
     # start nicp
     # for each stiffness
     stiffness = np.linspace(upper_stiffness, lower_stiffness, n_steps)
+    stiffness = [100, 75, 50, 20, 5, 2, 0.8, 0.5, 0.3, 0.2, 0.1, 0.05, 0.02]
     # stiffness = np.logspace(2, 0.01, 100) - 1
     errs = []
 
@@ -144,8 +145,9 @@ def non_rigid_icp(source, target, eps=1e-3):
 
     o = np.ones(n)
 
+    fits = []
+
     for alpha in stiffness:
-        print(alpha)
         # get the term for stiffness
         alpha_M_kron_G_s = alpha * M_kron_G_s
         j = 0
@@ -203,10 +205,11 @@ def non_rigid_icp(source, target, eps=1e-3):
             #     (n - w_i_n.sum() * 1.0) / n,
             #     (n - w_i_e.sum() * 1.0) / n,
             #     (n - w_i_i.sum() * 1.0) / n))
-            print('{} - total : {:.0%} norms: {:.0%} '
-                  'edges: {:.0%}'.format(j, (n - w_i.sum() * 1.0) / n,
-                                            (n - w_i_n.sum() * 1.0) / n,
-                                            (n - w_i_e.sum() * 1.0) / n))
+            print('alpha: {} ({}) - total : {:.0%} norms: {:.0%} '
+                  'edges: {:.0%}'.format(alpha, j + 1,
+                                         (n - w_i.sum() * 1.0) / n,
+                                         (n - w_i_n.sum() * 1.0) / n,
+                                         (n - w_i_e.sum() * 1.0) / n))
             j = j + 1
 
             # Build the sparse diagonal weight matrix
@@ -229,6 +232,7 @@ def non_rigid_icp(source, target, eps=1e-3):
             v_i = D_s.dot(X)
             err = np.linalg.norm(X_prev - X, ord='fro')
             errs.append([alpha, err])
+            fits.append([alpha, v_i])
             X_prev = X
 
             if err / np.sqrt(np.size(X_prev)) < eps:
@@ -239,4 +243,4 @@ def non_rigid_icp(source, target, eps=1e-3):
                            for p in v_i])
     # only update the points for the non-problematic ones
     # v_i[w_i] = point_corr[w_i]
-    return v_i, point_corr
+    return v_i, point_corr, tri_indicies, fits, errs
