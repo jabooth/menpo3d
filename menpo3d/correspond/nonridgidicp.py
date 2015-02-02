@@ -147,10 +147,9 @@ def non_rigid_icp(source, target, eps=1e-3):
         print(alpha)
         # get the term for stiffness
         alpha_M_kron_G_s = alpha * M_kron_G_s
-
+        j = 0
         # iterate until X converge
         while True:
-
             # find nearest neighbour and the normals
             points = []
             tri_indicies = []
@@ -160,23 +159,49 @@ def non_rigid_icp(source, target, eps=1e-3):
                 tri_indicies.append(tri_index)
             U = np.array(points)
 
-
-            u_i_n = target_tri_normals[tri_indicies]
-
-            # are any of the corresponding triangles on the edge of the target?
-            # where they are we return a false weight (we *don't* want to
+            # ---- WEIGHTS ----
+            # 1.  Edges
+            # Are any of the corresponding tris on the edge of the target?
+            # Where they are we return a false weight (we *don't* want to
             # include these points in the solve)
-            w_i_e = np.in1d(tri_indicies, edge_tris, invert=False)
+            w_i_e = np.in1d(tri_indicies, edge_tris, invert=True)
 
-            # calculate the normals of the current v_i
-            v_i_n = TriMesh(v_i, trilist=trilist, copy=False).vertex_normals()
-
+            # 2. Normals
+            # Calculate the normals of the current v_i
+            v_i_tm = TriMesh(v_i, trilist=trilist, copy=False)
+            v_i_n = v_i_tm.vertex_normals()
+            # Extract the corresponding normals from the target
+            u_i_n = target_tri_normals[tri_indicies]
             # If the dot of the normals is lt 0.9 don't contrib to deformation
             w_i_n = (u_i_n * v_i_n).sum(axis=1) > 0.9
 
+            # 3. Self-intersection
+            # Build an intersector for the current deformed target
+            intersect = build_intersector(v_i_tm.to_vtk())
+            # budge the source points 1% closer to the target
+            source = v_i + ((U - v_i) * 0.5)
+            # if the vector from source to target intersects the deformed
+            # template we don't want to include it in the optimisation.
+            problematic = [i for i, (s, t) in enumerate(zip(source, U))
+                           if len(intersect(s, t)[0]) > 0]
+            print(len(problematic) * 1.0 / n)
+            w_i_i = np.ones(v_i_tm.n_points, dtype=np.bool)
+            w_i_i[problematic] = False
+
+
             # Form the overall w_i from the normals, edge case and self
             # intersection
-            w_i = np.logical_or(w_i_n, w_i_e)
+            w_i = np.logical_and(w_i_n, w_i_e)
+            # w_i = w_i_n
+            # w_i = np.logical_and(np.logical_and(w_i_n, w_i_e), w_i_i)
+
+            print('{} - total : {:.0%} norms: {:.0%} '
+                  'edges: {:.0%} selfi: {:.0%}'.format(j,
+                (n - w_i.sum() * 1.0) / n,
+                (n - w_i_n.sum() * 1.0) / n,
+                (n - w_i_e.sum() * 1.0) / n,
+                (n - w_i_i.sum() * 1.0) / n))
+            j = j + 1
 
             # Build the sparse diagonal weight matrix
             W_s = sp.diags(w_i.astype(np.float)[None, :], [0])
@@ -207,5 +232,5 @@ def non_rigid_icp(source, target, eps=1e-3):
     point_corr = np.array([closest_point_on_target(p)[0]
                            for p in v_i])
     # only update the points for the non-problematic ones
-    v_i[w_i] = point_corr[w_i]
-    return v_i
+    # v_i[w_i] = point_corr[w_i]
+    return v_i, point_corr
