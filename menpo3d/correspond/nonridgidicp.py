@@ -91,7 +91,8 @@ def node_arc_incidence_matrix(trilist):
     return sp.coo_matrix((data, (row, col)))
 
 
-def non_rigid_icp(source, target, eps=1e-3):
+def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
+                  verbose=False):
     r"""
     Deforms the source trimesh to align with to optimally the target.
     """
@@ -115,11 +116,6 @@ def non_rigid_icp(source, target, eps=1e-3):
     points, trilist = source.points, source.trilist
     n = points.shape[0]  # record number of points
 
-    # Configuration
-    upper_stiffness = 100
-    lower_stiffness = 0.5
-    n_steps = 20
-
     edge_tris = edge_triangles(trilist)
 
     M_s = node_arc_incidence_matrix(trilist)
@@ -131,7 +127,6 @@ def non_rigid_icp(source, target, eps=1e-3):
 
     # build octree for finding closest points on target.
     target_vtk = target.to_vtk()
-    print('building nearest point locator for target...')
     closest_point_on_target = build_closest_point_locator(target_vtk)
 
     # save out the target normals. We need them for the weight matrix.
@@ -141,13 +136,19 @@ def non_rigid_icp(source, target, eps=1e-3):
     X_prev = np.tile(np.zeros((n_dims, h_dims)), n).T
     v_i = points
 
-    # start nicp
-    # for each stiffness
-    stiffness = np.linspace(upper_stiffness, lower_stiffness, n_steps)
-    stiffness = [50, 20, 5, 2, 0.8, 0.5, 0.35, 0.2]
-    # stiffness = np.logspace(2, 0.01, 100) - 1
-    errs = []
+    if stiffness_values is not None:
+        stiffness = stiffness_values
+        if verbose:
+            print('using user defined stiffness values: {}'.format(stiffness))
+    else:
+        # these values have been empirically found to perform well for well
+        # rigidly aligned facial meshes
+        stiffness = [50, 20, 5, 2, 0.8, 0.5, 0.35, 0.2]
+        if verbose:
+            print('using default stiffness values: {}'.format(stiffness))
 
+    # to store per iteration information
+    info = []
 
     # we need to prepare some indices for efficient construction of the D
     # sparse matrix.
@@ -195,7 +196,8 @@ def non_rigid_icp(source, target, eps=1e-3):
 
             # 3. Self-intersection
             # This adds approximately 12% to the running cost and doesn't seem
-            # to be very critical in helping mesh fitting performance.
+            # to be very critical in helping mesh fitting performance so for
+            # now it's removed. Revisit later.
             # # Build an intersector for the current deformed target
             # intersect = build_intersector(v_i_tm.to_vtk())
             # # budge the source points 1% closer to the target
@@ -209,22 +211,19 @@ def non_rigid_icp(source, target, eps=1e-3):
             # w_i_i[problematic] = False
 
 
-            # Form the overall w_i from the normals, edge case and self
-            # intersection
+            # Form the overall w_i from the normals, edge case
             w_i = np.logical_and(w_i_n, w_i_e)
+            # we could add self intersection at a later date too...
             # w_i = np.logical_and(np.logical_and(w_i_n, w_i_e), w_i_i)
 
-            # print('{} - total : {:.0%} norms: {:.0%} '
-            #       'edges: {:.0%} selfi: {:.0%}'.format(j,
-            #     (n - w_i.sum() * 1.0) / n,
-            #     (n - w_i_n.sum() * 1.0) / n,
-            #     (n - w_i_e.sum() * 1.0) / n,
-            #     (n - w_i_i.sum() * 1.0) / n))
-            print('alpha: {} ({}) - total : {:.0%} norms: {:.0%} '
-                  'edges: {:.0%}'.format(alpha, j + 1,
-                                         (n - w_i.sum() * 1.0) / n,
-                                         (n - w_i_n.sum() * 1.0) / n,
-                                         (n - w_i_e.sum() * 1.0) / n))
+
+            prop_w_i = (n - w_i.sum() * 1.0) / n
+            prop_w_i_n = (n - w_i_n.sum() * 1.0) / n
+            prop_w_i_e = (n - w_i_e.sum() * 1.0) / n
+            if verbose:
+                print('alpha: {} ({}) - total : {:.0%} norms: {:.0%} '
+                      'edges: {:.0%}'.format(alpha, j + 1, prop_w_i,
+                                             prop_w_i_n, prop_w_i_e))
             j = j + 1
 
             # Build the sparse diagonal weight matrix
@@ -246,7 +245,14 @@ def non_rigid_icp(source, target, eps=1e-3):
             # deform template
             v_i = D_s.dot(X)
             err = np.linalg.norm(X_prev - X, ord='fro')
-            errs.append([alpha, err])
+            info.append({
+                'alpha': alpha,
+                'iteration': j + 1,
+                'prop_omitted': prop_w_i,
+                'prop_omitted_norms': prop_w_i_n,
+                'prop_omitted_edges': prop_w_i_e,
+                'delta': err
+            })
             fits.append([alpha, restore.apply(v_i)])
             X_prev = X
 
@@ -257,4 +263,4 @@ def non_rigid_icp(source, target, eps=1e-3):
     point_corr = np.array([closest_point_on_target(p)[0]
                            for p in v_i])
 
-    return restore.apply(v_i), restore.apply(point_corr), tri_indicies, errs, fits
+    return restore.apply(v_i), restore.apply(point_corr), tri_indicies, info
