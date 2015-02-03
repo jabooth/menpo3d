@@ -106,6 +106,8 @@ def non_rigid_icp(source, target, eps=1e-3):
     source = prepare.apply(source)
     target = prepare.apply(target)
 
+    # store how to undo the similarity transform
+    restore = prepare.pseudoinverse()
 
     n_dims = source.n_dims
     # Homogeneous dimension (1 extra for translation effects)
@@ -157,6 +159,8 @@ def non_rigid_icp(source, target, eps=1e-3):
                      x[:, n_dims]))
 
     o = np.ones(n)
+
+    fits = []
 
     for alpha in stiffness:
         # get the term for stiffness
@@ -243,6 +247,7 @@ def non_rigid_icp(source, target, eps=1e-3):
             v_i = D_s.dot(X)
             err = np.linalg.norm(X_prev - X, ord='fro')
             errs.append([alpha, err])
+            fits.append([alpha, restore.apply(v_i)])
             X_prev = X
 
             if err / np.sqrt(np.size(X_prev)) < eps:
@@ -252,6 +257,4 @@ def non_rigid_icp(source, target, eps=1e-3):
     point_corr = np.array([closest_point_on_target(p)[0]
                            for p in v_i])
 
-    # undo the similarity transform
-    restore = prepare.pseudoinverse()
-    return restore.apply(v_i), restore.apply(point_corr), tri_indicies, errs
+    return restore.apply(v_i), restore.apply(point_corr), tri_indicies, errs, fits
