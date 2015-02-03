@@ -161,8 +161,6 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
 
     o = np.ones(n)
 
-    fits = []
-
     for alpha in stiffness:
         # get the term for stiffness
         alpha_M_kron_G_s = alpha * M_kron_G_s
@@ -253,7 +251,6 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
                 'prop_omitted_edges': prop_w_i_e,
                 'delta': err
             })
-            fits.append([alpha, restore.apply(v_i)])
             X_prev = X
 
             if err / np.sqrt(np.size(X_prev)) < eps:
