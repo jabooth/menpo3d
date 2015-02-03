@@ -4,6 +4,7 @@ from scipy.sparse.linalg import spsolve
 import scipy.sparse as sp
 import vtk
 from menpo.shape import TriMesh
+from menpo.transform import Translation, UniformScale
 
 
 def build_intersector(mesh):
@@ -94,6 +95,18 @@ def non_rigid_icp(source, target, eps=1e-3):
     r"""
     Deforms the source trimesh to align with to optimally the target.
     """
+    # Scale factors completely change the behavior of the algorithm - always
+    # rescale the source down to a sensible size (so it fits inside box of
+    # diagonal 1) and is centred on the origin. We'll undo this after the fit
+    # so the user can use whatever scale they prefer.
+    tr = Translation(-1 * source.centre())
+    sc = UniformScale(1.0 / np.sqrt(np.sum(source.range() ** 2)), 3)
+    prepare = tr.compose_before(sc)
+
+    source = prepare.apply(source)
+    target = prepare.apply(target)
+
+
     n_dims = source.n_dims
     # Homogeneous dimension (1 extra for translation effects)
     h_dims = n_dims + 1
@@ -144,8 +157,6 @@ def non_rigid_icp(source, target, eps=1e-3):
                      x[:, n_dims]))
 
     o = np.ones(n)
-
-    fits = []
 
     for alpha in stiffness:
         # get the term for stiffness
@@ -232,15 +243,15 @@ def non_rigid_icp(source, target, eps=1e-3):
             v_i = D_s.dot(X)
             err = np.linalg.norm(X_prev - X, ord='fro')
             errs.append([alpha, err])
-            fits.append([alpha, v_i])
             X_prev = X
 
             if err / np.sqrt(np.size(X_prev)) < eps:
                 break
 
-    # final result
+    # final result if we choose closest points
     point_corr = np.array([closest_point_on_target(p)[0]
                            for p in v_i])
-    # only update the points for the non-problematic ones
-    # v_i[w_i] = point_corr[w_i]
-    return v_i, point_corr, tri_indicies, fits, errs
+
+    # undo the similarity transform
+    restore = prepare.pseudoinverse()
+    return restore.apply(v_i), restore.apply(point_corr), tri_indicies, errs
