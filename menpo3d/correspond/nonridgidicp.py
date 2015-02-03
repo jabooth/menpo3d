@@ -169,11 +169,11 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
         while True:
             # find nearest neighbour and the normals
             points = []
-            tri_indicies = []
+            tri_indices = []
             for p in v_i:
                 point, tri_index = closest_point_on_target(p)
                 points.append(point)
-                tri_indicies.append(tri_index)
+                tri_indices.append(tri_index)
             U = np.array(points)
 
             # ---- WEIGHTS ----
@@ -181,14 +181,14 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
             # Are any of the corresponding tris on the edge of the target?
             # Where they are we return a false weight (we *don't* want to
             # include these points in the solve)
-            w_i_e = np.in1d(tri_indicies, edge_tris, invert=True)
+            w_i_e = np.in1d(tri_indices, edge_tris, invert=True)
 
             # 2. Normals
             # Calculate the normals of the current v_i
             v_i_tm = TriMesh(v_i, trilist=trilist, copy=False)
             v_i_n = v_i_tm.vertex_normals()
             # Extract the corresponding normals from the target
-            u_i_n = target_tri_normals[tri_indicies]
+            u_i_n = target_tri_normals[tri_indices]
             # If the dot of the normals is lt 0.9 don't contrib to deformation
             w_i_n = (u_i_n * v_i_n).sum(axis=1) > 0.9
 
@@ -260,4 +260,9 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
     point_corr = np.array([closest_point_on_target(p)[0]
                            for p in v_i])
 
-    return restore.apply(v_i), restore.apply(point_corr), tri_indicies, info
+    return {
+        'deformed_source': restore.apply(v_i),
+        'matched_target': restore.apply(point_corr),
+        'matched_tri_indices': tri_indices,
+        'info': info
+    }
