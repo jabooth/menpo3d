@@ -1,6 +1,14 @@
 from collections import Counter
 import numpy as np
-from scipy.sparse.linalg import spsolve
+try:
+    from scikits.sparse.cholmod import cholesky_AAt
+    def spsolve(sparse_X, dense_b):
+        factor = cholesky_AAt(sparse_X.T)
+        return factor(sparse_X.T.dot(dense_b)).toarray()
+except ImportError:
+    from scipy.sparse.linalg import spsolve as scipy_spsolve
+    def spsolve(sparse_X, dense_b):
+        return spsolve(sparse_X.T.dot(sparse_X), sparse_X.T.dot(dense_b)).toarray()
 import scipy.sparse as sp
 import vtk
 from menpo.shape import TriMesh
@@ -237,8 +245,7 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
             A_s = sp.vstack((alpha_M_kron_G_s, W_s.dot(D_s))).tocsr()
             B_s = sp.vstack((np.zeros((alpha_M_kron_G_s.shape[0], n_dims)),
                              U)).tocsr()
-            X_s = spsolve(A_s.T.dot(A_s), A_s.T.dot(B_s))
-            X = X_s.toarray()
+            X = spsolve(A_s, B_s)
 
             # deform template
             v_i = D_s.dot(X)
