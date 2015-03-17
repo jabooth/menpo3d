@@ -2,6 +2,9 @@ from collections import Counter
 import numpy as np
 import scipy.sparse as sp
 import vtk
+from vtk.util.numpy_support import (numpy_to_vtk, numpy_to_vtkIdTypeArray,
+                                    vtk_to_numpy)
+
 from menpo.shape import TriMesh
 from menpo.transform import Translation, UniformScale
 
@@ -21,7 +24,27 @@ except ImportError:
         return spsolve(sparse_X.T.dot(sparse_X), sparse_X.T.dot(dense_b)).toarray()
 
 
-def build_intersector(mesh):
+def to_vtk(trimesh):
+    mesh = vtk.vtkPolyData()
+    points = vtk.vtkPoints()
+    points.SetData(numpy_to_vtk(trimesh.points, deep=1))
+    mesh.SetPoints(points)
+
+    cells = vtk.vtkCellArray()
+    cells.SetCells(trimesh.n_tris,
+                   numpy_to_vtkIdTypeArray(np.hstack((np.ones(trimesh.n_tris)[:, None] * 3,
+                                                      trimesh.trilist)).astype(np.int64).ravel(), deep=1))
+    mesh.SetPolys(cells)
+    return mesh
+
+
+def from_vtk(vtk_mesh):
+    points = vtk_to_numpy(vtk_mesh.GetPoints().GetData())
+    trilist = vtk_to_numpy(vtk_mesh.GetPolys().GetData())
+    return TriMesh(points, trilist=trilist.reshape([-1, 4])[:, 1:])
+
+
+def build_intersector(vtk_mesh):
     r"""
     Build a function that can be used for calculating intersections of a ray
     with a mesh.
@@ -32,7 +55,7 @@ def build_intersector(mesh):
 
     """
     obbTree = vtk.vtkOBBTree()
-    obbTree.SetDataSet(mesh)
+    obbTree.SetDataSet(vtk_mesh)
     obbTree.BuildLocator()
 
     def intersect(source, target):
@@ -51,9 +74,9 @@ def build_intersector(mesh):
     return intersect
 
 
-def build_closest_point_locator(mesh):
+def build_closest_point_locator(vtk_mesh):
     cell_locator = vtk.vtkCellLocator()
-    cell_locator.SetDataSet(mesh)
+    cell_locator.SetDataSet(vtk_mesh)
     cell_locator.BuildLocator()
 
     c_point = [0., 0., 0.]
@@ -149,7 +172,7 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
     M_kron_G_s = sp.kron(M_s, G)
 
     # build octree for finding closest points on target.
-    target_vtk = target.to_vtk()
+    target_vtk = to_vtk(target)
     closest_point_on_target = build_closest_point_locator(target_vtk)
 
     # save out the target normals. We need them for the weight matrix.
@@ -220,7 +243,7 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
             # to be very critical in helping mesh fitting performance so for
             # now it's removed. Revisit later.
             # # Build an intersector for the current deformed target
-            # intersect = build_intersector(v_i_tm.to_vtk())
+            # intersect = build_intersector(to_vtk(v_i_tm))
             # # budge the source points 1% closer to the target
             # source = v_i + ((U - v_i) * 0.5)
             # # if the vector from source to target intersects the deformed
