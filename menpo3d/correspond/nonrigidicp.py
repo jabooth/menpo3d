@@ -1,21 +1,36 @@
 from collections import Counter
 import numpy as np
-try:
-    from scikits.sparse.cholmod import cholesky_AAt
-    def spsolve(sparse_X, dense_b):
-        factor = cholesky_AAt(sparse_X.T)
-        return factor(sparse_X.T.dot(dense_b)).toarray()
-except ImportError:
-    from scipy.sparse.linalg import spsolve as scipy_spsolve
-    def spsolve(sparse_X, dense_b):
-        return spsolve(sparse_X.T.dot(sparse_X), sparse_X.T.dot(dense_b)).toarray()
 import scipy.sparse as sp
 import vtk
 from menpo.shape import TriMesh
 from menpo.transform import Translation, UniformScale
 
+try:
+    from scikits.sparse.cholmod import cholesky_AAt
+
+    # user has cholesky available - provide a fast solve
+    def spsolve(sparse_X, dense_b):
+        factor = cholesky_AAt(sparse_X.T)
+        return factor(sparse_X.T.dot(dense_b)).toarray()
+
+except ImportError:
+    # fallback to (much slower) scipy solve
+    from scipy.sparse.linalg import spsolve as scipy_spsolve
+
+    def spsolve(sparse_X, dense_b):
+        return spsolve(sparse_X.T.dot(sparse_X), sparse_X.T.dot(dense_b)).toarray()
+
 
 def build_intersector(mesh):
+    r"""
+    Build a function that can be used for calculating intersections of a ray
+    with a mesh.
+
+    Parameters
+    ----------
+    mesh : VTK mesh
+
+    """
     obbTree = vtk.vtkOBBTree()
     obbTree.SetDataSet(mesh)
     obbTree.BuildLocator()
