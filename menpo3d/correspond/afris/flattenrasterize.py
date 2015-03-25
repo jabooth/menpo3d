@@ -7,6 +7,8 @@ from menpo3d.unwrap import optimal_cylindrical_unwrap
 
 
 class FlattenRasterize(object):
+    r"""Callable that will rasterize
+    """
 
     def __init__(self, sparse_template_3d, flattener=None,
                  image_width=1000, clip_space_scale=0.8):
@@ -40,8 +42,8 @@ class FlattenRasterize(object):
             self.rasterizer.model_to_image_transform.apply(f_template_3d))
 
     def template_image(self):
-        image = BooleanImage.blank((self.rasterizer.height,
-                                    self.rasterizer.width))
+        image = BooleanImage.init_blank((self.rasterizer.height,
+                                         self.rasterizer.width))
         image.landmarks['sparse_template_2d'] = self.sparse_template_2d
         return image
 
@@ -53,7 +55,7 @@ class FlattenRasterize(object):
     def template_image_height(self):
         return self.rasterizer.height
 
-    def __call__(self, mesh, **kwargs):
+    def __call__(self, mesh, verbose=False, **kwargs):
         r"""
         Use a flattened warped mesh to build back a TriMesh in dense
         correspondence.
@@ -70,22 +72,33 @@ class FlattenRasterize(object):
 
         """
         f_mesh = self.transform.apply(mesh, **kwargs)
+
+        # we now have the flattened mesh, in an arbitrary coordinate space.
+        # consult the rasterizer to find out where the triangles will be on
+        # the image plane.
+        f_mesh_img = self.rasterizer.model_to_image_transform.apply(f_mesh)
         # prune the mesh here to avoid artifacts
-        f_mesh_pruned = prune_wrapped_tris(f_mesh, self.template_image_width,
-                                           self.template_image_height)
-        if f_mesh.n_tris != f_mesh_pruned.n_tris:
-            print('removed {} problematic triangles'.format(
-                f_mesh.n_tris - f_mesh_pruned.n_tris))
+        good_tris = prune_wrapped_tris(f_mesh_img, self.template_image_width,
+                                       self.template_image_height)
+        # note that we only mask the triangulation - all the physical points
+        # are still present (and will be sent to the GPU)
+        f_mesh.trilist = f_mesh.trilist[good_tris]
+        if verbose:
+                print('removed {} problematic tris'.format(np.sum(~good_tris)))
         texture, shape = self.rasterizer.rasterize_mesh_with_f3v_interpolant(
-            f_mesh_pruned, per_vertex_f3v=mesh.points)
+            f_mesh, per_vertex_f3v=mesh.points)
         return {'texture_image': texture,
                 'shape_image': shape}
 
 
-tri_in_set = lambda tl, s: np.in1d(tl.ravel(), s).reshape([-1, 3]).any(axis=1)
+def tri_in_set(tl, s):
+    return np.in1d(tl.ravel(), s).reshape([-1, 3]).any(axis=1)
 
 
 def prune_wrapped_tris(trimesh, width, height, dead_zone=0.2):
+    r"""Returns a triangle mask that can be used to filter out triangles
+    that wrap around the extremities of an imag plane.
+    """
     p_h = trimesh.points[..., 0]
     p_w = trimesh.points[..., 1]
     tl = trimesh.trilist
@@ -104,7 +117,6 @@ def prune_wrapped_tris(trimesh, width, height, dead_zone=0.2):
     problem_h = np.logical_and(in_set_tl(lt_h), in_set_tl(gt_h))
     # we don't want triangles in problem_h or problem_w
     bad_tris = np.logical_or(problem_w, problem_h)
-    trimesh = trimesh.copy()
-    # remove any problematic tris
-    trimesh.trilist = trimesh.trilist[~bad_tris]
-    return trimesh
+
+    # good triangle are all that's left
+    return ~bad_tris

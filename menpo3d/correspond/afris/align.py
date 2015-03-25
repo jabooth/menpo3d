@@ -25,12 +25,12 @@ class AlignFR(object):
 
 class LandmarkAFR(AlignFR):
 
-    def __call__(self, mesh, group=None, label=None):
+    def __call__(self, mesh, group=None, label=None, **kwargs):
         alignment = AlignmentSimilarity(
             mesh.landmarks[group][label],
             self.sparse_template_3d).as_non_alignment()
         aligned_mesh = alignment.apply(mesh)
-        result = self.fr(aligned_mesh, group=group, label=label)
+        result = self.fr(aligned_mesh, group=group, label=label, **kwargs)
         result['sparse_3d'] = aligned_mesh.landmarks[group][label]
         result['alignment'] = alignment
         return result
@@ -40,13 +40,12 @@ class PartialLandmarkAFR(AlignFR):
 
     def __call__(self, mesh, mask, group=None, label=None):
         # copy the template
-        masked_sparse_template_3d = PointCloud(self.sparse_template_3d.points)
+        masked_template_3d = PointCloud(self.sparse_template_3d.points)
         # filter the points based on the mask
-        masked_sparse_template_3d.points = masked_sparse_template_3d.points[mask, :]
+        masked_template_3d.points = masked_template_3d.points[mask]
 
-        alignment = AlignmentSimilarity(
-            mesh.landmarks[group][label],
-            masked_sparse_template_3d).as_non_alignment()
+        alignment = AlignmentSimilarity(mesh.landmarks[group][label],
+                                        masked_template_3d).as_non_alignment()
         aligned_mesh = alignment.apply(mesh)
         result = self.fr(aligned_mesh)
         result['sparse_3d'] = aligned_mesh.landmarks[group][label]
