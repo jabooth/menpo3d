@@ -21,7 +21,8 @@ except ImportError:
     from scipy.sparse.linalg import spsolve as scipy_spsolve
 
     def spsolve(sparse_X, dense_b):
-        return spsolve(sparse_X.T.dot(sparse_X), sparse_X.T.dot(dense_b)).toarray()
+        return scipy_spsolve(sparse_X.T.dot(sparse_X),
+                             sparse_X.T.dot(dense_b)).toarray()
 
 
 def to_vtk(trimesh):
