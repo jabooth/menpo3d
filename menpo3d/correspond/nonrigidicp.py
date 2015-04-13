@@ -139,7 +139,7 @@ def node_arc_incidence_matrix(trilist):
 
 
 def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
-                  verbose=False):
+                  verbose=False, landmarks=None, lm_weight=None):
     r"""
     Deforms the source trimesh to align with to optimally the target.
     """
@@ -194,6 +194,17 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
         if verbose:
             print('using default stiffness values: {}'.format(stiffness))
 
+    if lm_weight is not None:
+        lm_weight = lm_weight
+        if verbose:
+            print('using user defined lm_weight values: {}'.format(lm_weight))
+    else:
+        # these values have been empirically found to perform well for well
+        # rigidly aligned facial meshes
+        lm_weight = [5,  2, .5, 0,   0,   0,    0,    0]
+        if verbose:
+            print('using default lm_weight values: {}'.format(lm_weight))
+
     # to store per iteration information
     info = []
 
@@ -206,9 +217,25 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
     col = np.hstack((x[:, :n_dims].ravel(),
                      x[:, n_dims]))
 
+    if landmarks is not None:
+        if verbose:
+            print("'{}' landmarks will be used as a landmark constraint.".format(landmarks))
+        source_lm_index = source.distance_to(
+            source.landmarks[landmarks].lms).argmin(axis=0)
+        target_lms = target.landmarks[landmarks].lms
+        U_L = target_lms.points
+        n_landmarks = target_lms.n_points
+        lm_mask = np.in1d(row, source_lm_index)
+        col_lm = col[lm_mask]
+        # pull out the rows for the lms - but the values are
+        # all wrong! need to map them back to the order of the landmarks
+        row_lm_to_fix = row[lm_mask]
+        source_lm_index_l = list(source_lm_index)
+        row_lm = np.array([source_lm_index_l.index(r) for r in row_lm_to_fix])
+
     o = np.ones(n)
 
-    for alpha in stiffness:
+    for alpha, beta in zip(stiffness, lm_weight):
         # get the term for stiffness
         alpha_M_kron_G_s = alpha * M_kron_G_s
         j = 0
@@ -265,10 +292,6 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
             prop_w_i = (n - w_i.sum() * 1.0) / n
             prop_w_i_n = (n - w_i_n.sum() * 1.0) / n
             prop_w_i_e = (n - w_i_e.sum() * 1.0) / n
-            if verbose:
-                print('alpha: {} ({}) - total : {:.0%} norms: {:.0%} '
-                      'edges: {:.0%}'.format(alpha, j + 1, prop_w_i,
-                                             prop_w_i_n, prop_w_i_e))
             j = j + 1
 
             # Build the sparse diagonal weight matrix
@@ -281,22 +304,48 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
             # nullify the masked U values
             U[~w_i] = 0
 
-            A_s = sp.vstack((alpha_M_kron_G_s, W_s.dot(D_s))).tocsr()
-            B_s = sp.vstack((np.zeros((alpha_M_kron_G_s.shape[0], n_dims)),
-                             U)).tocsr()
+            to_stack_A = [alpha_M_kron_G_s, W_s.dot(D_s)]
+            to_stack_B = [np.zeros((alpha_M_kron_G_s.shape[0], n_dims)), U]
+
+            if landmarks:
+                D_L = sp.coo_matrix((data[lm_mask], (row_lm, col_lm)),
+                                    shape=(n_landmarks, D_s.shape[1]))
+                to_stack_A.append(beta * D_L)
+                to_stack_B.append(beta * U_L)
+
+            A_s = sp.vstack(to_stack_A).tocsr()
+            B_s = sp.vstack(to_stack_B).tocsr()
             X = spsolve(A_s, B_s)
 
             # deform template
             v_i = D_s.dot(X)
             err = np.linalg.norm(X_prev - X, ord='fro')
-            info.append({
+
+            if landmarks is not None:
+                src_lms = v_i[source_lm_index]
+                lm_err = np.sqrt((src_lms - U_L) ** 2).sum(axis=1).mean()
+
+            if verbose:
+                v_str = ('a: {}, ({}) - total : {:.0%} norms: {:.0%} '
+                         'edges: {:.0%}'.format(alpha, j, prop_w_i,
+                                                prop_w_i_n, prop_w_i_e))
+                if landmarks is not None:
+                    v_str += ' beta: {}, lm_err: {:.5f}'.format(beta, lm_err)
+
+                print(v_str)
+
+            info_dict = {
                 'alpha': alpha,
                 'iteration': j + 1,
                 'prop_omitted': prop_w_i,
                 'prop_omitted_norms': prop_w_i_n,
                 'prop_omitted_edges': prop_w_i_e,
                 'delta': err
-            })
+            }
+            if landmarks:
+                info_dict['beta'] = beta
+                info_dict['lm_err'] = lm_err
+            info.append(info_dict)
             X_prev = X
 
             if err / np.sqrt(np.size(X_prev)) < eps:
@@ -306,9 +355,14 @@ def non_rigid_icp(source, target, eps=1e-3, stiffness_values=None,
     point_corr = np.array([closest_point_on_target(p)[0]
                            for p in v_i])
 
-    return {
+    result = {
         'deformed_source': restore.apply(v_i),
         'matched_target': restore.apply(point_corr),
         'matched_tri_indices': tri_indices,
         'info': info
     }
+
+    if landmarks is not None:
+        result['source_lm_index'] = source_lm_index
+
+    return result
