@@ -140,20 +140,21 @@ def rasterize_barycentric_coordinates(mesh, image_shape):
     yx = yx[z_buffer_mask]
     bcoords = bcoords[z_buffer_mask]
     tri_indices = tri_indices[z_buffer_mask]
-    return yx, tri_indices, bcoords
+    return yx, bcoords, tri_indices
 
 
 def rasterize_barycentric_coordinate_images(mesh, image_shape):
     h, w = image_shape
-    yx, tri_indices, bcoords = rasterize_barycentric_coordinates(mesh, image_shape)
+    yx, bcoords, tri_indices = rasterize_barycentric_coordinates(mesh,
+                                                                 image_shape)
 
-    tri_index_img = np.zeros((1, h, w), dtype=int)
-    bcoord_img = np.zeros((3, h, w))
+    tri_indices_img = np.zeros((1, h, w), dtype=int)
+    bcoords_img = np.zeros((3, h, w))
     mask = np.zeros((h, w), dtype=np.bool)
     mask[yx[:, 0], yx[:, 1]] = True
-    tri_index_img[:, yx[:, 0], yx[:, 1]] = tri_indices
-    bcoord_img[:, yx[:, 0], yx[:, 1]] = bcoords.T
+    tri_indices_img[:, yx[:, 0], yx[:, 1]] = tri_indices
+    bcoords_img[:, yx[:, 0], yx[:, 1]] = bcoords.T
 
     mask = BooleanImage(mask)
-    return (MaskedImage(tri_index_img, mask=mask.copy(), copy=False),
-            MaskedImage(bcoord_img, mask=mask.copy(), copy=False))
+    return (MaskedImage(bcoords_img, mask=mask.copy(), copy=False),
+            MaskedImage(tri_indices_img, mask=mask.copy(), copy=False))
