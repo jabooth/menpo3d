@@ -88,26 +88,45 @@ class LucasKanade(object):
     def compute_cost(self, data_error, lms_error, shape_parameters,
                      texture_parameters, shape_prior_weight,
                      texture_prior_weight, landmarks_prior_weight):
-        # Cost of data term
-        current_cost = data_error.T.dot(data_error)
 
+        # Cost of data term
+        data_cost = data_error.T.dot(data_error)
+        print('')
         # Cost of shape prior
         if shape_prior_weight is not None:
-            current_cost += (shape_prior_weight *
-                             np.sum((shape_parameters ** 2) *
-                                    self.J_shape_prior))
+            print('shape_prior: {}'.format(shape_prior_weight))
+            shape_cost = (shape_prior_weight *
+                          np.sum((shape_parameters ** 2) * self.J_shape_prior))
+        else:
+            print('Warning - no shape prior weight')
+            shape_cost = 0
 
         # Cost of texture prior
         if texture_prior_weight is not None:
-            current_cost += (texture_prior_weight *
-                             np.sum((texture_parameters ** 2) *
-                                    self.J_texture_prior))
+            print('texture_prior: {}'.format(texture_prior_weight))
+            print('texture_parameters: {}'.format(texture_parameters))
+            print('J_texture_prior: {}'.format(self.J_texture_prior))
+            texture_cost = (texture_prior_weight *
+                            np.sum((texture_parameters ** 2) *
+                                   self.J_texture_prior))
+        else:
+            print('Warning - no texture prior weight')
+            texture_cost = 0
 
         # Cost of landmarks prior
         if landmarks_prior_weight is not None:
-            current_cost += landmarks_prior_weight * lms_error.T.dot(lms_error)
+            print('landmarks_prior: {}'.format(landmarks_prior_weight))
+            landmarks_cost = landmarks_prior_weight * lms_error.T.dot(lms_error)
+        else:
+            print('Warning - no landmarks prior weight')
+            landmarks_cost = 0
 
-        return current_cost
+        total_cost = data_cost + shape_cost + texture_cost + landmarks_cost
+
+        print('COST: {}\n    Data: {}\n    Shape: {}\n    Texture: {}'
+              '\n    Landmarks: {}'.format(total_cost, data_cost, shape_cost,
+                                           texture_cost, landmarks_cost))
+        return total_cost
 
     def J_lms(self, camera, warped_uv, shape_pc_uv, camera_update,
               focal_length_update):
@@ -499,6 +518,14 @@ class WibergForwardAdditive(LucasKanade):
                 sd_error[:idx] = landmarks_prior_weight * sd_lms.dot(lms_error)
 
             if return_costs:
+                print('\n\n')
+                print(img_error_uv.shape)
+                # samples channels n components
+                print(texture_pc_uv.shape)
+
+                texture_parameters = np.linalg.lstsq(texture_pc_uv,
+                                                     img_error_uv)[0]
+                print('texture_parameters: {}'.format(texture_parameters))
                 costs.append(self.compute_cost(
                     img_error_uv, lms_error, shape_parameters,
                     texture_parameters, shape_prior_weight,
