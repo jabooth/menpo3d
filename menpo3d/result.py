@@ -1658,6 +1658,24 @@ class MultiScaleNonParametricIterativeResult(NonParametricIterativeResult):
             self.final_camera_transform.apply(self.final_mesh))
         return as_trimesh(mesh_in_img.with_dims([0, 1]))
 
+    def final_mesh_projected_in_image(self):
+        r"""
+        Returns the final mesh projected in the image plane.
+
+        :type: `menpo.shape.TriMesh`
+            The final mesh projected in the image plane.
+
+        Raises
+        ------
+        ValueError
+            The final camera transform does not exist.
+        """
+        if self.final_camera_transform is None:
+            raise ValueError("The final camera transform does not exist.")
+        mesh_in_img = self._affine_transforms[-1].apply(
+            self.final_camera_transform.apply(self.final_mesh))
+        return as_trimesh(mesh_in_img)
+
     def initial_mesh_projected_in_2d(self):
         r"""
         Returns the initial mesh projected in the image plane.

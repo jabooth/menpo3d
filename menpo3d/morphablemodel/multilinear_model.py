@@ -38,8 +38,7 @@ class MultilinearModel(object):
                 mdl.instance_vector(weights[start_end], normalized_weights) 
                 for mdl, start_end in zip(self.models, slices)
             ], 0)
-            
-        
+
         return self.template_instance.from_vector(v)
 
     @property
