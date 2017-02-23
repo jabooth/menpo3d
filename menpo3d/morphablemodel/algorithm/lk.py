@@ -2,7 +2,7 @@ import numpy as np
 
 from menpo.feature import gradient as fast_gradient
 from menpo.image import Image
-from menpo.visualize import print_dynamic
+from menpo.visualize import print_dynamic, bytes_str
 
 from menpo3d.rasterize import rasterize_barycentric_coordinates
 
@@ -91,41 +91,39 @@ class LucasKanade(object):
 
         # Cost of data term
         data_cost = data_error.T.dot(data_error)
-        print('')
+        # print('')
         # Cost of shape prior
         if shape_prior_weight is not None:
-            print('shape_prior: {}'.format(shape_prior_weight))
+            # print('shape_prior: {}'.format(shape_prior_weight))
             shape_cost = (shape_prior_weight *
                           np.sum((shape_parameters ** 2) * self.J_shape_prior))
         else:
-            print('Warning - no shape prior weight')
+            # print('Warning - no shape prior weight')
             shape_cost = 0
 
         # Cost of texture prior
         if texture_prior_weight is not None:
-            print('texture_prior: {}'.format(texture_prior_weight))
-            print('texture_parameters: {}'.format(texture_parameters))
-            print('J_texture_prior: {}'.format(self.J_texture_prior))
+            # print('texture_prior: {}'.format(texture_prior_weight))
+            # print('texture_parameters: {}'.format(texture_parameters))
+            # print('J_texture_prior: {}'.format(self.J_texture_prior))
             texture_cost = (texture_prior_weight *
                             np.sum((texture_parameters ** 2) *
                                    self.J_texture_prior))
         else:
-            print('Warning - no texture prior weight')
+            # print('Warning - no texture prior weight')
             texture_cost = 0
 
         # Cost of landmarks prior
         if landmarks_prior_weight is not None:
-            print('landmarks_prior: {}'.format(landmarks_prior_weight))
+            # print('landmarks_prior: {}'.format(landmarks_prior_weight))
             landmarks_cost = landmarks_prior_weight * lms_error.T.dot(lms_error)
         else:
-            print('Warning - no landmarks prior weight')
+            # print('Warning - no landmarks prior weight')
             landmarks_cost = 0
 
         total_cost = data_cost + shape_cost + texture_cost + landmarks_cost
 
-        print('COST: {}\n    Data: {}\n    Shape: {}\n    Texture: {}'
-              '\n    Landmarks: {}'.format(total_cost, data_cost, shape_cost,
-                                           texture_cost, landmarks_cost))
+        # print('COST: {}\n    Data: {}\n    Shape:scost, landmarks_cost))
         return total_cost
 
     def J_lms(self, camera, warped_uv, shape_pc_uv, camera_update,
@@ -240,6 +238,9 @@ class SimultaneousForwardAdditive(LucasKanade):
                     camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
                     grad_y_uv, camera_update, focal_length_update,
                     reconstruction_weight)
+                if verbose:
+                    print(sd.shape)
+                    print(bytes_str(sd.nbytes))
                 hessian = sd.dot(sd.T)
                 sd_error = sd.dot(img_error_uv)
             else:
@@ -308,8 +309,8 @@ class SimultaneousForwardAdditive(LucasKanade):
                                            texture_weights=texture_parameters)
 
             # Update lists
-            shape_parameters_per_iter.append(shape_parameters)
-            texture_parameters_per_iter.append(texture_parameters)
+            shape_parameters_per_iter.append(shape_parameters.copy())
+            texture_parameters_per_iter.append(texture_parameters.copy())
             camera_per_iter.append(camera)
             instance_per_iter.append(instance.rescale_texture(0., 1.))
 
@@ -443,6 +444,8 @@ class WibergForwardAdditive(LucasKanade):
         # Main loop
         while k < max_iters and eps > self.eps:
             if verbose:
+                print("{}/{}".format(k + 1, max_iters))
+            else:
                 print_dynamic("{}/{}".format(k + 1, max_iters))
             # Apply camera projection on current instance
             instance_in_image = camera.apply(instance)
@@ -459,20 +462,27 @@ class WibergForwardAdditive(LucasKanade):
             texture_pc_uv = self.model.sample_texture_model(bcoords,
                                                             tri_indices)
             texture_pc_uv = texture_pc_uv.reshape((-1, self.m))
-            m_texture_uv = self.model.instance().\
-                sample_texture_with_barycentric_coordinates(bcoords,
-                                                            tri_indices)
-            shape_pc_uv = self.sample(self.shape_pc, bcoords, vertex_indices)
+            m_texture_uv = (
+                self.model
+                    .instance()
+                    .sample_texture_with_barycentric_coordinates(bcoords,
+                                                                 tri_indices).T
+            )
+
             # Reshape shape basis after sampling
-            shape_pc_uv = shape_pc_uv.reshape([self.n_samples, 3, -1])
+            # shape_pc_uv: (n_samples, xyz, shape_components)
+            shape_pc_uv = (self.sample(self.shape_pc, bcoords, vertex_indices)
+                               .reshape([self.n_samples, 3, -1]))
 
             # Sample all the terms from the image part at the sample locations
+            # img_uv: (channels, samples)
             img_uv = image.sample(yx)
             grad_x_uv = grad_x.sample(yx)
             grad_y_uv = grad_y.sample(yx)
 
             # Compute error
-            img_error_uv = (img_uv - m_texture_uv.T).ravel()
+            # img_error_uv: (channels x samples,)
+            img_error_uv = (img_uv - m_texture_uv).ravel()
 
             # Compute Jacobian, SD and Hessian of data term
             if reconstruction_weight is not None:
@@ -482,6 +492,9 @@ class WibergForwardAdditive(LucasKanade):
                     reconstruction_weight)
                 hessian = sd.dot(sd.T)
                 sd_error = sd.dot(img_error_uv)
+                if verbose:
+                    print(sd.shape)
+                    print(bytes_str(sd.nbytes))
             else:
                 n_camera_parameters = 0
                 if camera_update:
@@ -518,11 +531,32 @@ class WibergForwardAdditive(LucasKanade):
                 sd_error[:idx] = landmarks_prior_weight * sd_lms.dot(lms_error)
 
             if return_costs:
+                # print('\n\n')
+                # print(img_error_uv.shape)
+                # # samples channels n components
+                # print(texture_pc_uv.shape)
+
+                texture_parameters = np.linalg.lstsq(texture_pc_uv,
+                                                     img_error_uv)[0]
+                # print('texture_parameters: {}'.format(texture_parameters))
                 costs.append(self.compute_cost(
                     img_error_uv, lms_error, shape_parameters,
                     texture_parameters, shape_prior_weight,
                     texture_prior_weight, landmarks_prior_weight))
 
+            mod = yield {
+                'hessian': hessian,
+                'sd_error': sd_error,
+                'algorithm': self
+            }
+            if mod is not None:
+                if verbose:
+                    print('Update hessian/sd_error received!')
+                hessian = mod['hessian']
+                sd_error = mod['sd_error']
+            else:
+                if verbose:
+                    print('No modification to hessian/sd_error')
             # Solve to find the increment of parameters
             d_shape, d_camera = self.solve(hessian, sd_error, camera_update,
                                            focal_length_update)
@@ -539,33 +573,21 @@ class WibergForwardAdditive(LucasKanade):
                                            texture_weights=texture_parameters)
 
             # Update lists
-            shape_parameters_per_iter.append(shape_parameters)
-            texture_parameters_per_iter.append(texture_parameters)
+            shape_parameters_per_iter.append(shape_parameters.copy())
+            texture_parameters_per_iter.append(texture_parameters.copy())
             camera_per_iter.append(camera)
             instance_per_iter.append(instance.rescale_texture(0., 1.))
 
             # Increase iteration counter
             k += 1
 
-            # shape_parameters, texture_parameters, camera_parameters = yield \
-            #     shape_parameters, texture_parameters, camera_parameters
-
-        return MMAlgorithmResult(
+        yield MMAlgorithmResult(
             shape_parameters=shape_parameters_per_iter,
             texture_parameters=texture_parameters_per_iter,
             meshes=instance_per_iter, camera_transforms=camera_per_iter,
             image=image, initial_mesh=initial_mesh.rescale_texture(0., 1.),
             initial_camera_transform=camera_per_iter[0], gt_mesh=gt_mesh,
             costs=costs)
-
-    def project_out(self, J, U):
-        tmp = J.dot(U)
-        return J - tmp.dot(U.T)
-
-    def compute_hessian(self, sd):
-        n_params = sd.shape[1]
-        sd = np.transpose(sd, (1, 0, 2)).reshape(n_params, -1)
-        return sd.dot(sd.T)
 
     def J_data(self, camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
                grad_y_uv, camera_update, focal_length_update,
@@ -587,7 +609,7 @@ class WibergForwardAdditive(LucasKanade):
         # Project-out
         n_params = J.shape[1]
         J = np.transpose(J, (1, 0, 2)).reshape(n_params, -1)
-        PJ = self.project_out(J, texture_pc_uv)
+        PJ = project_out(J, texture_pc_uv)
 
         # Concatenate to create the data term steepest descent
         return reconstruction_prior_weight * PJ, n_camera_parameters
@@ -645,3 +667,8 @@ def camera_parameters_update(c, dc):
     new = c + dc
     new[1:5] = quaternion_multiply(c[1:5], dc[1:5])
     return new
+
+
+def project_out(J, U):
+    tmp = J.dot(U)
+    return J - tmp.dot(U.T)
