@@ -60,7 +60,7 @@ class OrthographicProjection(Transform, Vectorizable):
     def n_parameters(self):
         return 1
 
-    def as_vector(self):
+    def _as_vector(self):
         return np.array([self.focal_length])
 
     def _from_vector_inplace(self, vector):
@@ -80,6 +80,7 @@ class OrthographicProjection(Transform, Vectorizable):
 
 
 class PerspectiveProjection(OrthographicProjection):
+
     def _apply(self, x, **kwargs):
         f = self.focal_length
         c_x = self.width / 2
@@ -93,7 +94,7 @@ class PerspectiveProjection(OrthographicProjection):
         return output
 
 
-class OrthographicCamera(Vectorizable):
+class OrthographicCamera(Transform, Vectorizable):
     def __init__(self, rotation, translation, projection):
         self.rotation_transform = rotation
         self.translation_transform = translation
@@ -120,8 +121,8 @@ class OrthographicCamera(Vectorizable):
         return OrthographicCamera(r, t, OrthographicProjection(focal_length,
                                                                image_shape))
 
-    def apply(self, instance, **kwargs):
-        return self.camera_transform.apply(instance)
+    def _apply(self, instance, **kwargs):
+        return self.camera_transform._apply(instance)
 
     @property
     def n_parameters(self):
@@ -129,7 +130,7 @@ class OrthographicCamera(Vectorizable):
                 self.rotation_transform.n_parameters +
                 self.translation_transform.n_parameters)
 
-    def as_vector(self):
+    def _as_vector(self):
         # focal_length, q_w, q_x, q_y, q_z, t_x, t_y, t_z
         params = np.zeros(self.n_parameters)
 
@@ -158,6 +159,7 @@ class OrthographicCamera(Vectorizable):
 
 
 class PerspectiveCamera(OrthographicCamera):
+
     @classmethod
     def init_from_image_shape_and_vector(cls, image_shape, vector):
         r = Rotation.init_identity(n_dims=3)
