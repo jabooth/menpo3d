@@ -144,7 +144,9 @@ class MMFitter(object):
                        focal_length_update=False, reconstruction_weight=1.,
                        shape_prior_weight=None, texture_prior_weight=None,
                        landmarks_prior_weight=None, landmarks=None,
-                       return_costs=False, verbose=False):
+                       return_costs=False,
+                       initial_shape_params=None,
+                       verbose=False):
         # The fitter
         # Check provided instance
         if instance is None:
@@ -183,6 +185,7 @@ class MMFitter(object):
                 texture_prior_weight=texture_prior_weight[i],
                 landmarks_prior_weight=landmarks_prior_weight[i],
                 landmarks=landmarks, return_costs=return_costs,
+                initial_shape_params=initial_shape_params,
                 verbose=verbose)
 
     def fit_from_camera(self, image, camera, instance=None, gt_mesh=None,
@@ -229,13 +232,22 @@ class MMFitter(object):
                        shape_prior_weight=[1, 1, 2, 2],
                        texture_prior_weight=1., landmarks_prior_weight=1.,
                        return_costs=False, distortion_coeffs=None,
-                       init_shape_params_from_lms=False, verbose=False):
-
-        (rescaled_image, rescaled_initial_shape, affine_transform,
-         instance, camera) = self._init_fit_from_shape(
-            image, initial_shape, distortion_coeffs=distortion_coeffs,
-            init_shape_params_from_lms=init_shape_params_from_lms,
-            verbose=verbose)
+                       init_shape_params_from_lms=False,
+                       initial_shape_params=None,
+                       initial_shape_just_for_init=None,
+                       verbose=False):
+        if initial_shape_just_for_init is not None:
+            (rescaled_image, rescaled_initial_shape, affine_transform,
+             instance, camera) = self._init_fit_from_dense_shape(
+                image, initial_shape, initial_shape_just_for_init,
+                distortion_coeffs=distortion_coeffs,
+                verbose=verbose)
+        else:
+            (rescaled_image, rescaled_initial_shape, affine_transform,
+             instance, camera) = self._init_fit_from_shape(
+                image, initial_shape, distortion_coeffs=distortion_coeffs,
+                init_shape_params_from_lms=init_shape_params_from_lms,
+                verbose=verbose)
 
         # Execute multi-scale fitting
         algorithm_results = self._fit(
@@ -247,6 +259,7 @@ class MMFitter(object):
             texture_prior_weight=texture_prior_weight,
             landmarks_prior_weight=landmarks_prior_weight,
             landmarks=rescaled_initial_shape, return_costs=return_costs,
+            initial_shape_params=initial_shape_params,
             verbose=verbose)
 
         # Return multi-scale fitting result
@@ -296,6 +309,30 @@ class MMFitter(object):
             instance = None
         return (rescaled_image, rescaled_initial_shape, affine_transform,
                 instance, camera)
+
+    def _init_fit_from_dense_shape(self, image, initial_shape,
+                                   initial_shape_just_for_init,
+                                   distortion_coeffs=None,
+                                   verbose=False):
+        # Check that the provided initial shape has the same number of points
+        # as the landmarks of the model
+
+        if initial_shape_just_for_init.n_points != self.mm.landmarks.n_points:
+            raise ValueError(
+                "The provided 2D initial shape must have {} "
+                "points.".format(self.mm.landmarks.n_points))
+
+        # Rescale image and extract features
+        rescaled_image, rescaled_initial_shape, affine_transform = \
+            self._prepare_image(image, initial_shape)
+
+        # Estimate view, projection and rotation transforms from the
+        # provided initial shape
+        camera = self.camera_cls.init_from_2d_projected_shape(
+            self.mm.landmarks, rescaled_initial_shape, rescaled_image.shape,
+            distortion_coeffs=distortion_coeffs)
+        return (rescaled_image, rescaled_initial_shape, affine_transform,
+                initial_shape, camera)
 
     def fit_video_from_shapes(self, video, initial_shapes, max_iters=50,
                               camera_update=True, focal_length_update=False,

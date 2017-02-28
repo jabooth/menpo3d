@@ -405,7 +405,8 @@ class WibergForwardAdditive(LucasKanade):
             camera_update=False, focal_length_update=False,
             reconstruction_weight=1., shape_prior_weight=1.,
             texture_prior_weight=1., landmarks=None,
-            landmarks_prior_weight=1., return_costs=False, verbose=True):
+            landmarks_prior_weight=1., return_costs=False, verbose=True,
+            initial_shape_params=None):
         # Parse landmarks prior options
         if landmarks is None or landmarks_prior_weight is None:
             landmarks_prior_weight = None
@@ -417,7 +418,13 @@ class WibergForwardAdditive(LucasKanade):
         # Retrieve camera parameters from the provided camera object.
         # Project provided instance to retrieve shape and texture parameters.
         camera_parameters = camera.as_vector()
-        shape_parameters = self.model.shape_model.project(initial_mesh)
+        if initial_shape_params is not None:
+            if verbose:
+                print('Using initial shape parameters')
+            shape_parameters = initial_shape_params
+            initial_mesh.points = self.model.shape_model.instance(shape_parameters).points
+        else:
+            shape_parameters = self.model.shape_model.project(initial_mesh)
         texture_parameters = self.model.project_instance_on_texture_model(
             initial_mesh)
 
@@ -444,8 +451,6 @@ class WibergForwardAdditive(LucasKanade):
         # Main loop
         while k < max_iters and eps > self.eps:
             if verbose:
-                print("{}/{}".format(k + 1, max_iters))
-            else:
                 print_dynamic("{}/{}".format(k + 1, max_iters))
             # Apply camera projection on current instance
             instance_in_image = camera.apply(instance)
