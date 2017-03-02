@@ -65,7 +65,7 @@ def per_vertex_occlusion_accurate(mesh):
     for start, end, point in zip(ray_start, ray_end, points):
         start = tuple(start)
         end = tuple(end)
-        #obbTree.IntersectWithLine(start, end, vtk_points, vtk_cellIds)
+        obbTree.IntersectWithLine(start, end, vtk_points, vtk_cellIds)
         data = vtk_points.GetData()
         if data.GetNumberOfTuples() > 0:
             first_intersects.append(data.GetTuple3(0))
