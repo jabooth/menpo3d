@@ -14,6 +14,9 @@ def align_2d_3d(points_3d, points_image, image_shape, focal_length=None,
         raise MenpoMissingDependencyError('opencv3')
     height, width = image_shape
     # Create camera matrix
+    if focal_length is not None:
+        print('using predefined focal length: {}'.format(focal_length))
+
     focal_length = (max(height, width)
                     if focal_length is None else focal_length)
     c_x = width / 2.0
