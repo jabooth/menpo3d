@@ -229,12 +229,13 @@ class MMFitter(object):
     def fit_from_shape(self, image, initial_shape, gt_mesh=None, max_iters=50,
                        camera_update=True, focal_length_update=False,
                        reconstruction_weight=1.,
-                       shape_prior_weight=[1, 1, 2, 2],
+                       shape_prior_weight=(1, 1, 2, 2),
                        texture_prior_weight=1., landmarks_prior_weight=1.,
                        return_costs=False, distortion_coeffs=None,
                        init_shape_params_from_lms=False,
                        initial_shape_params=None,
                        initial_shape_just_for_init=None,
+                       focal_length=None,
                        verbose=False):
         if initial_shape_just_for_init is not None:
             (rescaled_image, rescaled_initial_shape, affine_transform,
@@ -247,7 +248,7 @@ class MMFitter(object):
              instance, camera) = self._init_fit_from_shape(
                 image, initial_shape, distortion_coeffs=distortion_coeffs,
                 init_shape_params_from_lms=init_shape_params_from_lms,
-                verbose=verbose)
+                verbose=verbose, focal_length=focal_length)
 
         # Execute multi-scale fitting
         algorithm_results = self._fit(
@@ -270,6 +271,7 @@ class MMFitter(object):
     def _init_fit_from_shape(self, image, initial_shape,
                              distortion_coeffs=None,
                              init_shape_params_from_lms=False,
+                             focal_length=None,
                              verbose=False):
         # Check that the provided initial shape has the same number of points
         # as the landmarks of the model
@@ -286,7 +288,7 @@ class MMFitter(object):
         # provided initial shape
         camera = self.camera_cls.init_from_2d_projected_shape(
             self.mm.landmarks, rescaled_initial_shape, rescaled_image.shape,
-            distortion_coeffs=distortion_coeffs)
+            distortion_coeffs=distortion_coeffs, focal_length=focal_length)
 
         if init_shape_params_from_lms:
             if verbose:
@@ -312,7 +314,7 @@ class MMFitter(object):
 
     def _init_fit_from_dense_shape(self, image, initial_shape,
                                    initial_shape_just_for_init,
-                                   distortion_coeffs=None,
+                                   distortion_coeffs=None, focal_length=None,
                                    verbose=False):
         # Check that the provided initial shape has the same number of points
         # as the landmarks of the model
@@ -330,7 +332,7 @@ class MMFitter(object):
         # provided initial shape
         camera = self.camera_cls.init_from_2d_projected_shape(
             self.mm.landmarks, rescaled_initial_shape, rescaled_image.shape,
-            distortion_coeffs=distortion_coeffs)
+            distortion_coeffs=distortion_coeffs, focal_length=focal_length)
         return (rescaled_image, rescaled_initial_shape, affine_transform,
                 initial_shape, camera)
 
