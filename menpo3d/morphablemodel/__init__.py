@@ -1,3 +1,3 @@
 from .base import ColouredMorphableModel, TexturedMorphableModel
-from .algorithm import SimultaneousForwardAdditive, ProjectOutForwardAdditive
+from .algorithm import ProjectOutForwardAdditive
 from .fitter import LucasKanadeMMFitter

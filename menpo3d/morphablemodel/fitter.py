@@ -6,7 +6,7 @@ from menpo.shape import PointCloud
 import menpo3d.checks as checks
 from menpo3d.camera import PerspectiveCamera, OrthographicCamera
 
-from .algorithm import SimultaneousForwardAdditive
+from .algorithm import ProjectOutForwardAdditive
 from .result import MMResult, MMAlgorithmResult
 from .shapemodel import ShapeModel
 
@@ -396,7 +396,7 @@ class MMFitter(object):
 
 
 class LucasKanadeMMFitter(MMFitter):
-    def __init__(self, mm, lk_algorithm_cls=SimultaneousForwardAdditive,
+    def __init__(self, mm, lk_algorithm_cls=ProjectOutForwardAdditive,
                  n_scales=1, n_shape=1.0, n_texture=1.0, n_samples=1000,
                  camera_cls=PerspectiveCamera):
         # Check parameters

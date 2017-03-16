@@ -6,8 +6,8 @@ from menpo.visualize import print_progress
 
 from menpo3d.morphablemodel.algorithm.derivatives import (
     d_camera_d_shape_parameters, d_camera_d_camera_parameters)
-from menpo3d.morphablemodel.algorithm.lk import (camera_parameters_update,
-                                                 project_out)
+from menpo3d.morphablemodel.algorithm.lk import camera_parameters_update
+from menpo3d.morphablemodel.algorithm.lk.projectout import project_out
 from menpo3d.rasterize import rasterize_barycentric_coordinates
 
 
