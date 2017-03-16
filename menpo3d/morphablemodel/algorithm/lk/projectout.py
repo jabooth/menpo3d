@@ -5,14 +5,49 @@ from menpo3d.morphablemodel.result import MMAlgorithmResult
 
 from ..derivatives import (d_camera_d_camera_parameters,
                            d_camera_d_shape_parameters)
-from .base import camera_parameters_update, LucasKanade
+from .base import camera_parameters_update, LucasKanade, J_lms
+
+
+def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
+           grad_y_uv, camera_update, focal_length_update,
+           reconstruction_prior_weight):
+    # Compute derivative of camera wrt shape and camera parameters
+    dp_da_dr = d_camera_d_shape_parameters(camera, warped_uv, shape_pc_uv)
+    n_camera_parameters = 0
+    if camera_update:
+        dp_dr = d_camera_d_camera_parameters(
+            camera, warped_uv, with_focal_length=focal_length_update)
+        dp_da_dr = np.hstack((dp_da_dr, dp_dr))
+        n_camera_parameters = dp_dr.shape[1]
+
+    # Multiply image gradient with camera derivative
+    permuted_grad_x = np.transpose(grad_x_uv[..., None], (0, 2, 1))
+    permuted_grad_y = np.transpose(grad_y_uv[..., None], (0, 2, 1))
+    J = permuted_grad_x * dp_da_dr[0] + permuted_grad_y * dp_da_dr[1]
+
+    # Project-out
+    n_params = J.shape[1]
+    J = np.transpose(J, (1, 0, 2)).reshape(n_params, -1)
+    PJ = project_out(J, texture_pc_uv)
+
+    # Concatenate to create the data term steepest descent
+    return reconstruction_prior_weight * PJ, n_camera_parameters
+
+
+def project_out(J, U):
+    tmp = J.dot(U)
+    return J - tmp.dot(U.T)
 
 
 class ProjectOutForwardAdditive(LucasKanade):
     r"""
-    Class for defining Wiberg Forward Additive Morphable Model optimization
-    algorithm.
+    Project Out Forward Additive Morphable Model optimization algorithm.
     """
+    def _precompute(self):
+        # call super method
+        super(ProjectOutForwardAdditive, self)._precompute()
+        self.texture_T = self.model.texture_model.components.T
+
     def run(self, image, initial_mesh, camera, gt_mesh=None, max_iters=20,
             camera_update=False, focal_length_update=False,
             reconstruction_weight=1., shape_prior_weight=1.,
@@ -103,7 +138,7 @@ class ProjectOutForwardAdditive(LucasKanade):
 
             # Compute Jacobian, SD and Hessian of data term
             if reconstruction_weight is not None:
-                sd, n_camera_parameters = self.J_data(
+                sd, n_camera_parameters = J_data(
                     camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
                     grad_y_uv, camera_update, focal_length_update,
                     reconstruction_weight)
@@ -139,7 +174,7 @@ class ProjectOutForwardAdditive(LucasKanade):
                 warped_view_lms = instance_w[self.model.model_landmarks_index]
 
                 # Jacobian and Hessian wrt shape parameters
-                sd_lms, n_camera_parameters = self.J_lms(
+                sd_lms, n_camera_parameters = J_lms(
                     camera, warped_view_lms, self.shape_pc_lms, camera_update,
                     focal_length_update)
                 idx = self.n + n_camera_parameters
@@ -194,31 +229,6 @@ class ProjectOutForwardAdditive(LucasKanade):
             initial_camera_transform=camera_per_iter[0], gt_mesh=gt_mesh,
             costs=costs)
 
-    def J_data(self, camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
-               grad_y_uv, camera_update, focal_length_update,
-               reconstruction_prior_weight):
-        # Compute derivative of camera wrt shape and camera parameters
-        dp_da_dr = d_camera_d_shape_parameters(camera, warped_uv, shape_pc_uv)
-        n_camera_parameters = 0
-        if camera_update:
-            dp_dr = d_camera_d_camera_parameters(
-                camera, warped_uv, with_focal_length=focal_length_update)
-            dp_da_dr = np.hstack((dp_da_dr, dp_dr))
-            n_camera_parameters = dp_dr.shape[1]
-
-        # Multiply image gradient with camera derivative
-        permuted_grad_x = np.transpose(grad_x_uv[..., None], (0, 2, 1))
-        permuted_grad_y = np.transpose(grad_y_uv[..., None], (0, 2, 1))
-        J = permuted_grad_x * dp_da_dr[0] + permuted_grad_y * dp_da_dr[1]
-
-        # Project-out
-        n_params = J.shape[1]
-        J = np.transpose(J, (1, 0, 2)).reshape(n_params, -1)
-        PJ = project_out(J, texture_pc_uv)
-
-        # Concatenate to create the data term steepest descent
-        return reconstruction_prior_weight * PJ, n_camera_parameters
-
     def solve(self, hessian, sd_error, camera_update, focal_length_update):
         # Solve
         ds = - np.linalg.solve(hessian, sd_error)
@@ -245,15 +255,5 @@ class ProjectOutForwardAdditive(LucasKanade):
 
         return d_shape, d_camera
 
-    def _precompute(self):
-        # call super method
-        super(ProjectOutForwardAdditive, self)._precompute()
-        self.texture_T = self.model.texture_model.components.T
-
     def __str__(self):
         return "Project Out Forward Additive"
-
-
-def project_out(J, U):
-    tmp = J.dot(U)
-    return J - tmp.dot(U.T)

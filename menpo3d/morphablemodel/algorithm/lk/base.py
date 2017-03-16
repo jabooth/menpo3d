@@ -28,6 +28,38 @@ def quaternion_multiply(current_q, increment_q):
                       x1*y0 - y1*x0 + z1*w0 + w1*z0], dtype=np.float64)
 
 
+def gradient_xy(image, n_channels):
+    # Compute the gradient of the image
+    grad = fast_gradient(image)
+
+    # Create gradient image for X and Y
+    grad_y = Image(grad.pixels[:n_channels])
+    grad_x = Image(grad.pixels[n_channels:])
+
+    return grad_x, grad_y
+
+
+def sample(x, bcoords, vertex_indices):
+    per_vert_per_pixel = x[vertex_indices]
+    return np.sum(per_vert_per_pixel * bcoords[..., None], axis=1)
+
+
+def J_lms(camera, warped_uv, shape_pc_uv, camera_update, focal_length_update):
+    # Compute derivative of camera wrt shape and camera parameters
+    J = d_camera_d_shape_parameters(camera, warped_uv, shape_pc_uv)
+    n_camera_parameters = 0
+    if camera_update:
+        dp_dr = d_camera_d_camera_parameters(
+            camera, warped_uv, with_focal_length=focal_length_update)
+        J = np.hstack((J, dp_dr))
+        n_camera_parameters = dp_dr.shape[1]
+
+    # Reshape to : n_params x (2 * N)
+    n_params = J.shape[1]
+    J = np.transpose(J, (1, 0, 2)).reshape(n_params, -1)
+    return J, n_camera_parameters
+
+
 class LucasKanade(object):
     def __init__(self, model, n_samples, eps=1e-3):
         self.model = model
@@ -72,6 +104,12 @@ class LucasKanade(object):
         """
         return self.model.n_channels
 
+    def sample(self, x, bcoords, vertex_indices):
+        return sample(x, bcoords, vertex_indices)
+
+    def gradient(self, image):
+        return gradient_xy(image, self.n_channels)
+
     def visible_sample_points(self, instance_in_img, image_shape):
         # Inverse rendering
         yx, bcoords, tri_indices = rasterize_barycentric_coordinates(
@@ -87,20 +125,6 @@ class LucasKanade(object):
         vertex_indices = instance_in_img.trilist[tri_indices]
 
         return vertex_indices, bcoords, tri_indices, yx
-
-    def sample(self, x, bcoords, vertex_indices):
-        per_vert_per_pixel = x[vertex_indices]
-        return np.sum(per_vert_per_pixel * bcoords[..., None], axis=1)
-
-    def gradient(self, image):
-        # Compute the gradient of the image
-        grad = fast_gradient(image)
-
-        # Create gradient image for X and Y
-        grad_y = Image(grad.pixels[:self.n_channels])
-        grad_x = Image(grad.pixels[self.n_channels:])
-
-        return grad_x, grad_y
 
     def compute_cost(self, data_error, lms_error, shape_parameters,
                      texture_parameters, shape_prior_weight,
@@ -142,22 +166,6 @@ class LucasKanade(object):
 
         # print('COST: {}\n    Data: {}\n    Shape:scost, landmarks_cost))
         return total_cost
-
-    def J_lms(self, camera, warped_uv, shape_pc_uv, camera_update,
-              focal_length_update):
-        # Compute derivative of camera wrt shape and camera parameters
-        J = d_camera_d_shape_parameters(camera, warped_uv, shape_pc_uv)
-        n_camera_parameters = 0
-        if camera_update:
-            dp_dr = d_camera_d_camera_parameters(
-                camera, warped_uv, with_focal_length=focal_length_update)
-            J = np.hstack((J, dp_dr))
-            n_camera_parameters = dp_dr.shape[1]
-
-        # Reshape to : n_params x (2 * N)
-        n_params = J.shape[1]
-        J = np.transpose(J, (1, 0, 2)).reshape(n_params, -1)
-        return J, n_camera_parameters
 
     def _precompute(self):
         # Rescale shape and appearance components to have size:

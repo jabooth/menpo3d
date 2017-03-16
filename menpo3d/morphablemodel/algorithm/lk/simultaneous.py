@@ -5,13 +5,41 @@ from menpo3d.morphablemodel.result import MMAlgorithmResult
 
 from ..derivatives import (d_camera_d_camera_parameters,
                            d_camera_d_shape_parameters)
-from .base import camera_parameters_update, LucasKanade
+from .base import camera_parameters_update, LucasKanade, J_lms
+
+
+def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
+           grad_y_uv, camera_update, focal_length_update,
+           reconstruction_prior_weight):
+    # Compute derivative of camera wrt shape and camera parameters
+    dp_da_dr = d_camera_d_shape_parameters(camera, warped_uv, shape_pc_uv)
+    n_camera_parameters = 0
+    if camera_update:
+        dp_dr = d_camera_d_camera_parameters(
+            camera, warped_uv, with_focal_length=focal_length_update)
+        dp_da_dr = np.hstack((dp_da_dr, dp_dr))
+        n_camera_parameters = dp_dr.shape[1]
+
+    # Multiply image gradient with camera derivative
+    permuted_grad_x = np.transpose(grad_x_uv[..., None], (0, 2, 1))
+    permuted_grad_y = np.transpose(grad_y_uv[..., None], (0, 2, 1))
+    J = permuted_grad_x * dp_da_dr[0] + permuted_grad_y * dp_da_dr[1]
+
+    # Computer derivative of texture wrt texture parameters
+    dt_db = - np.rollaxis(texture_pc_uv, 0, 3)
+
+    # Concatenate to create the data term steepest descent
+    J = np.hstack((J, dt_db))
+
+    # Reshape to : n_params x (2 * N)
+    n_params = J.shape[1]
+    J = np.transpose(J, (1, 0, 2)).reshape(n_params, -1)
+    return reconstruction_prior_weight * J, n_camera_parameters
 
 
 class SimultaneousForwardAdditive(LucasKanade):
     r"""
-    Class for defining Simultaneous Forward Additive Morphable Model
-    optimization algorithm.
+    Simultaneous Forward Additive Morphable Model optimization algorithm.
     """
     def run(self, image, initial_mesh, camera, gt_mesh=None, max_iters=20,
             camera_update=False, focal_length_update=False,
@@ -87,13 +115,10 @@ class SimultaneousForwardAdditive(LucasKanade):
 
             # Compute Jacobian, SD and Hessian of data term
             if reconstruction_weight is not None:
-                sd, n_camera_parameters = self.J_data(
+                sd, n_camera_parameters = J_data(
                     camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
                     grad_y_uv, camera_update, focal_length_update,
                     reconstruction_weight)
-                if verbose:
-                    print(sd.shape)
-                    print(bytes_str(sd.nbytes))
                 hessian = sd.dot(sd.T)
                 sd_error = sd.dot(img_error_uv)
             else:
@@ -130,7 +155,7 @@ class SimultaneousForwardAdditive(LucasKanade):
                 warped_view_lms = instance_w[self.model.model_landmarks_index]
 
                 # Jacobian and Hessian wrt shape parameters
-                sd_lms, n_camera_parameters = self.J_lms(
+                sd_lms, n_camera_parameters = J_lms(
                     camera, warped_view_lms, self.shape_pc_lms, camera_update,
                     focal_length_update)
                 idx = self.n + n_camera_parameters
@@ -216,34 +241,6 @@ class SimultaneousForwardAdditive(LucasKanade):
                 d_texture = ds[self.n:]
 
         return d_shape, d_camera, d_texture
-
-    def J_data(self, camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
-               grad_y_uv, camera_update, focal_length_update,
-               reconstruction_prior_weight):
-        # Compute derivative of camera wrt shape and camera parameters
-        dp_da_dr = d_camera_d_shape_parameters(camera, warped_uv, shape_pc_uv)
-        n_camera_parameters = 0
-        if camera_update:
-            dp_dr = d_camera_d_camera_parameters(
-                camera, warped_uv, with_focal_length=focal_length_update)
-            dp_da_dr = np.hstack((dp_da_dr, dp_dr))
-            n_camera_parameters = dp_dr.shape[1]
-
-        # Multiply image gradient with camera derivative
-        permuted_grad_x = np.transpose(grad_x_uv[..., None], (0, 2, 1))
-        permuted_grad_y = np.transpose(grad_y_uv[..., None], (0, 2, 1))
-        J = permuted_grad_x * dp_da_dr[0] + permuted_grad_y * dp_da_dr[1]
-
-        # Computer derivative of texture wrt texture parameters
-        dt_db = - np.rollaxis(texture_pc_uv, 0, 3)
-
-        # Concatenate to create the data term steepest descent
-        J = np.hstack((J, dt_db))
-
-        # Reshape to : n_params x (2 * N)
-        n_params = J.shape[1]
-        J = np.transpose(J, (1, 0, 2)).reshape(n_params, -1)
-        return reconstruction_prior_weight * J, n_camera_parameters
 
     def __str__(self):
         return "Simultaneous Forward Additive"
