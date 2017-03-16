@@ -549,19 +549,7 @@ class WibergForwardAdditive(LucasKanade):
                     texture_parameters, shape_prior_weight,
                     texture_prior_weight, landmarks_prior_weight))
 
-            mod = yield {
-                'hessian': hessian,
-                'sd_error': sd_error,
-                'algorithm': self
-            }
-            if mod is not None:
-                if verbose:
-                    print('Update hessian/sd_error received!')
-                hessian = mod['hessian']
-                sd_error = mod['sd_error']
-            else:
-                if verbose:
-                    print('No modification to hessian/sd_error')
+            yield locals()
             # Solve to find the increment of parameters
             d_shape, d_camera = self.solve(hessian, sd_error, camera_update,
                                            focal_length_update)
