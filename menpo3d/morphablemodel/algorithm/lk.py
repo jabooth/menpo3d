@@ -238,9 +238,6 @@ class SimultaneousForwardAdditive(LucasKanade):
                     camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
                     grad_y_uv, camera_update, focal_length_update,
                     reconstruction_weight)
-                if verbose:
-                    print(sd.shape)
-                    print(bytes_str(sd.nbytes))
                 hessian = sd.dot(sd.T)
                 sd_error = sd.dot(img_error_uv)
             else:
@@ -281,9 +278,9 @@ class SimultaneousForwardAdditive(LucasKanade):
                     camera, warped_view_lms, self.shape_pc_lms, camera_update,
                     focal_length_update)
                 idx = self.n + n_camera_parameters
-                hessian[:idx, :idx] += (landmarks_prior_weight *
-                                        sd_lms.dot(sd_lms.T))
-                sd_error[:idx] = landmarks_prior_weight * sd_lms.dot(lms_error)
+                sd_lms *= np.asarray(landmarks_prior_weight).reshape(-1)[None, :]
+                hessian[:idx, :idx] += sd_lms.dot(sd_lms.T)
+                sd_error[:idx] = sd_lms.dot(lms_error)
 
             if return_costs:
                 costs.append(self.compute_cost(
@@ -320,7 +317,7 @@ class SimultaneousForwardAdditive(LucasKanade):
             # shape_parameters, texture_parameters, camera_parameters = yield \
             #     shape_parameters, texture_parameters, camera_parameters
 
-        return MMAlgorithmResult(
+        yield MMAlgorithmResult(
             shape_parameters=shape_parameters_per_iter,
             texture_parameters=texture_parameters_per_iter,
             meshes=instance_per_iter, camera_transforms=camera_per_iter,
@@ -419,8 +416,6 @@ class WibergForwardAdditive(LucasKanade):
         # Project provided instance to retrieve shape and texture parameters.
         camera_parameters = camera.as_vector()
         if initial_shape_params is not None:
-            if verbose:
-                print('Using initial shape parameters')
             shape_parameters = initial_shape_params
             initial_mesh.points = self.model.shape_model.instance(shape_parameters).points
         else:
@@ -497,9 +492,6 @@ class WibergForwardAdditive(LucasKanade):
                     reconstruction_weight)
                 hessian = sd.dot(sd.T)
                 sd_error = sd.dot(img_error_uv)
-                if verbose:
-                    print(sd.shape)
-                    print(bytes_str(sd.nbytes))
             else:
                 n_camera_parameters = 0
                 if camera_update:
@@ -530,10 +522,11 @@ class WibergForwardAdditive(LucasKanade):
                 sd_lms, n_camera_parameters = self.J_lms(
                     camera, warped_view_lms, self.shape_pc_lms, camera_update,
                     focal_length_update)
+                
+                sd_lms *= np.asarray(landmarks_prior_weight).reshape(-1)[None, :]
                 idx = self.n + n_camera_parameters
-                hessian[:idx, :idx] += (landmarks_prior_weight *
-                                        sd_lms.dot(sd_lms.T))
-                sd_error[:idx] = landmarks_prior_weight * sd_lms.dot(lms_error)
+                hessian[:idx, :idx] += (sd_lms.dot(sd_lms.T))
+                sd_error[:idx] = sd_lms.dot(lms_error)
 
             if return_costs:
                 # print('\n\n')
@@ -555,13 +548,8 @@ class WibergForwardAdditive(LucasKanade):
                 'algorithm': self
             }
             if mod is not None:
-                if verbose:
-                    print('Update hessian/sd_error received!')
                 hessian = mod['hessian']
                 sd_error = mod['sd_error']
-            else:
-                if verbose:
-                    print('No modification to hessian/sd_error')
             # Solve to find the increment of parameters
             d_shape, d_camera = self.solve(hessian, sd_error, camera_update,
                                            focal_length_update)

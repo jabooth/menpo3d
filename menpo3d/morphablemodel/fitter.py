@@ -164,8 +164,9 @@ class MMFitter(object):
             self.n_scales, (float, int, None), 'texture_prior_weight',
             texture_prior_weight)
         landmarks_prior_weight = checks.check_multi_scale_param(
-            self.n_scales, (float, int, None), 'landmarks_prior_weight',
+            self.n_scales, (float, int, None, np.ndarray), 'landmarks_prior_weight',
             landmarks_prior_weight)
+
         for i in range(self.n_scales):
             if (reconstruction_weight[i] is None and
                     landmarks_prior_weight[i] is None):
@@ -185,7 +186,6 @@ class MMFitter(object):
                 texture_prior_weight=texture_prior_weight[i],
                 landmarks_prior_weight=landmarks_prior_weight[i],
                 landmarks=landmarks, return_costs=return_costs,
-                initial_shape_params=initial_shape_params,
                 verbose=verbose)
 
     def fit_from_camera(self, image, camera, instance=None, gt_mesh=None,

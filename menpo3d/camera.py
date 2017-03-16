@@ -44,6 +44,11 @@ def align_2d_3d(points_3d, points_image, image_shape, focal_length=None,
 
     return r, t, focal_length
 
+def translation_to_three_d(vector):
+    if len(vector) == 2:
+        return np.pad(vector, (0, 1), 'constant')
+
+    return vector
 
 class OrthographicProjection(Transform, Vectorizable):
 
@@ -118,6 +123,7 @@ class OrthographicCamera(Transform, Vectorizable):
         r, t, focal_length = align_2d_3d(
             points_3d, points_image, image_shape, focal_length=focal_length,
             distortion_coeffs=distortion_coeffs)
+
         return OrthographicCamera(r, t, OrthographicProjection(focal_length,
                                                                image_shape))
 
@@ -126,9 +132,7 @@ class OrthographicCamera(Transform, Vectorizable):
 
     @property
     def n_parameters(self):
-        return (self.projection_transform.n_parameters +
-                self.rotation_transform.n_parameters +
-                self.translation_transform.n_parameters)
+        return 7
 
     def _as_vector(self):
         # focal_length, q_w, q_x, q_y, q_z, t_x, t_y, t_z
@@ -141,13 +145,13 @@ class OrthographicCamera(Transform, Vectorizable):
         params[1:5] = self.rotation_transform.as_vector()
 
         # 3 parameters: t_x, t_y, t_z
-        params[5:] = self.translation_transform.as_vector()
+        params[5:] = self.translation_transform.as_vector()[:len(params[5:])]
         return params
 
     def _from_vector_inplace(self, vector):
         self.projection_transform._from_vector_inplace(vector[:1])
         self.rotation_transform._from_vector_inplace(vector[1:5])
-        self.translation_transform._from_vector_inplace(vector[5:])
+        self.translation_transform._from_vector_inplace(translation_to_three_d(vector[5:]))
 
     @property
     def view_transform(self):
@@ -159,6 +163,11 @@ class OrthographicCamera(Transform, Vectorizable):
 
 
 class PerspectiveCamera(OrthographicCamera):
+    @property
+    def n_parameters(self):
+        return (self.projection_transform.n_parameters +
+                self.rotation_transform.n_parameters +
+                self.translation_transform.n_parameters)
 
     @classmethod
     def init_from_image_shape_and_vector(cls, image_shape, vector):
