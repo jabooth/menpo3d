@@ -40,8 +40,25 @@ def gradient_xy(image, n_channels):
 
 
 def sample(x, bcoords, vertex_indices):
-    per_vert_per_pixel = x[vertex_indices]
-    return np.sum(per_vert_per_pixel * bcoords[..., None], axis=1)
+    per_vertex_per_pixel = x[vertex_indices]
+    return np.sum(per_vertex_per_pixel * bcoords[..., None], axis=1)
+
+
+def visible_sample_points(instance_in_img, image_shape, n_samples):
+    # Inverse rendering
+    yx, bcoords, tri_indices = rasterize_barycentric_coordinates(
+        instance_in_img, image_shape)
+
+    # Select triangles randomly
+    rand = np.random.permutation(bcoords.shape[0])
+    bcoords = bcoords[rand[:n_samples]]
+    yx = yx[rand[:n_samples]]
+    tri_indices = tri_indices[rand[:n_samples]]
+
+    # Build the vertex indices (3 per pixel) for the visible triangles
+    vertex_indices = instance_in_img.trilist[tri_indices]
+
+    return vertex_indices, bcoords, tri_indices, yx
 
 
 def J_lms(camera, warped_uv, shape_pc_uv, camera_update, focal_length_update):
@@ -111,20 +128,8 @@ class LucasKanade(object):
         return gradient_xy(image, self.n_channels)
 
     def visible_sample_points(self, instance_in_img, image_shape):
-        # Inverse rendering
-        yx, bcoords, tri_indices = rasterize_barycentric_coordinates(
-            instance_in_img, image_shape)
-
-        # Select triangles randomly
-        rand = np.random.permutation(bcoords.shape[0])
-        bcoords = bcoords[rand[:self.n_samples]]
-        yx = yx[rand[:self.n_samples]]
-        tri_indices = tri_indices[rand[:self.n_samples]]
-
-        # Build the vertex indices (3 per pixel) for the visible triangles
-        vertex_indices = instance_in_img.trilist[tri_indices]
-
-        return vertex_indices, bcoords, tri_indices, yx
+        return visible_sample_points(instance_in_img, image_shape,
+                                     self.n_samples)
 
     def compute_cost(self, data_error, lms_error, shape_parameters,
                      texture_parameters, shape_prior_weight,
@@ -132,7 +137,6 @@ class LucasKanade(object):
 
         # Cost of data term
         data_cost = data_error.T.dot(data_error)
-        # print('')
         # Cost of shape prior
         if shape_prior_weight is not None:
             # print('shape_prior: {}'.format(shape_prior_weight))

@@ -1,47 +1,12 @@
 import numpy as np
-
-from menpo.feature import gradient as fast_gradient
-from menpo.image import Image
 from menpo.visualize import print_progress
 
 from menpo3d.morphablemodel.algorithm.derivatives import (
     d_camera_d_shape_parameters, d_camera_d_camera_parameters)
 from menpo3d.morphablemodel.algorithm.lk import camera_parameters_update
+from menpo3d.morphablemodel.algorithm.lk.base import (gradient_xy, sample,
+                                                      visible_sample_points)
 from menpo3d.morphablemodel.algorithm.lk.projectout import project_out
-from menpo3d.rasterize import rasterize_barycentric_coordinates
-
-
-def gradient(image, n_channels):
-    # Compute the gradient of the image
-    grad = fast_gradient(image)
-
-    # Create gradient image for X and Y
-    grad_y = Image(grad.pixels[:n_channels])
-    grad_x = Image(grad.pixels[n_channels:])
-
-    return grad_x, grad_y
-
-
-def visible_sample_points(instance_in_img, image_shape, n_samples):
-    # Inverse rendering
-    yx, bcoords, tri_indices = rasterize_barycentric_coordinates(
-        instance_in_img, image_shape)
-
-    # Select triangles randomly
-    rand = np.random.permutation(bcoords.shape[0])
-    bcoords = bcoords[rand[:n_samples]]
-    yx = yx[rand[:n_samples]]
-    tri_indices = tri_indices[rand[:n_samples]]
-
-    # Build the vertex indices (3 per pixel) for the visible triangles
-    vertex_indices = instance_in_img.trilist[tri_indices]
-
-    return vertex_indices, bcoords, tri_indices, yx
-
-
-def sample(x, bcoords, vertex_indices):
-    per_vertex_per_pixel = x[vertex_indices]
-    return np.sum(per_vertex_per_pixel * bcoords[..., None], axis=1)
 
 
 def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
@@ -231,10 +196,6 @@ def single_iteration_update(shape_parameters, camera_parameters,
     return shape_parameters, camera_parameters
 
 
-# def run(image, initial_mesh, camera, gt_mesh=None, max_iters=20,
-#         camera_update=False, focal_length_update=False,
-# landmarks=None, initial_shape_params=None):
-
 def fit_video(frames, cameras, shape_parameters,
               mm, id_indices, exp_indices,
               reconstruction_weight=1., shape_prior_weight=1.,
@@ -259,7 +220,7 @@ def fit_video(frames, cameras, shape_parameters,
     lms_points = image.landmarks[None].points[:, [1, 0]]
 
     # Compute input image gradient
-    grad_x, grad_y = gradient(image, mm.n_channels)
+    grad_x, grad_y = gradient_xy(image, mm.n_channels)
 
     for _ in print_progress(list(range(n_iters))):
         shape_parameters, camera_parameters = single_iteration_update(
