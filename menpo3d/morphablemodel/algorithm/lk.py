@@ -396,7 +396,7 @@ class SimultaneousForwardAdditive(LucasKanade):
         return "Simultaneous Forward Additive"
 
 
-class WibergForwardAdditive(LucasKanade):
+class ProjectOutForwardAdditive(LucasKanade):
     r"""
     Class for defining Wiberg Forward Additive Morphable Model optimization
     algorithm.
@@ -635,7 +635,7 @@ class WibergForwardAdditive(LucasKanade):
 
     def _precompute(self):
         # call super method
-        super(WibergForwardAdditive, self)._precompute()
+        super(ProjectOutForwardAdditive, self)._precompute()
         self.texture_T = self.model.texture_model.components.T
 
     def __str__(self):
