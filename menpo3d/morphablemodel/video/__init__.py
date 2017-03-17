@@ -1,12 +1,12 @@
 import numpy as np
 from menpo.visualize import print_progress
 
-from menpo3d.morphablemodel.algorithm.derivatives import (
-    d_camera_d_shape_parameters, d_camera_d_camera_parameters)
-from menpo3d.morphablemodel.algorithm.lk import camera_parameters_update
-from menpo3d.morphablemodel.algorithm.lk.base import (gradient_xy, sample,
-                                                      visible_sample_points)
-from menpo3d.morphablemodel.algorithm.lk.projectout import project_out
+from ..algorithm.derivatives import (d_camera_d_shape_parameters,
+                                     d_camera_d_camera_parameters)
+from ..algorithm.lk import camera_parameters_update
+from ..algorithm.lk.base import (gradient_xy, sample_at_bc_vi,
+                                 visible_sample_points)
+from ..algorithm.lk.projectout import project_out
 
 
 def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
@@ -65,7 +65,7 @@ def jacobians(shape_parameters, camera_parameters,
     instance_w = camera.view_transform.apply(instance.points)
 
     # Sample all the terms from the model part at the sample locations
-    warped_uv = sample(instance_w, bcoords, vertex_indices)
+    warped_uv = sample_at_bc_vi(instance_w, bcoords, vertex_indices)
     texture_pc_uv = model.sample_texture_model(bcoords,
                                                tri_indices).reshape((-1, m))
     m_texture_uv = (
@@ -74,8 +74,8 @@ def jacobians(shape_parameters, camera_parameters,
 
     # Reshape shape basis after sampling
     # shape_pc_uv: (n_samples, xyz, shape_components)
-    shape_pc_uv = sample(shape_pc, bcoords, vertex_indices).reshape([n_samples,
-                                                                     3, -1])
+    shape_pc_uv = sample_at_bc_vi(shape_pc, bcoords, vertex_indices).reshape([n_samples,
+                                                                              3, -1])
 
     # Sample all the terms from the image part at the sample locations
     # img_uv: (channels, samples)
@@ -137,16 +137,11 @@ def single_iteration_update(shape_parameters, camera_parameters,
     # the cost issue?
     sd_error = sd.dot(img_error_uv)
 
-
-
     # Compute Jacobian, update SD and Hessian wrt shape prior
     sd_shape = shape_prior_weight * J_shape_prior
 
     hessian[:self.n, :self.n] += np.diag(sd_shape)
     sd_error[:self.n] += sd_shape * shape_parameters
-
-
-
 
     # Compute Jacobian, update SD and Hessian wrt landmarks prior
 

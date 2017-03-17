@@ -5,7 +5,8 @@ from menpo3d.morphablemodel.result import MMAlgorithmResult
 
 from ..derivatives import (d_camera_d_camera_parameters,
                            d_camera_d_shape_parameters)
-from .base import camera_parameters_update, LucasKanade, J_lms, gradient_xy
+from .base import (camera_parameters_update, gradient_xy, J_lms, LucasKanade,
+                   sample_at_bc_vi, visible_sample_points)
 
 
 def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
@@ -70,6 +71,9 @@ class ProjectOutForwardAdditive(LucasKanade):
     r"""
     Project Out Forward Additive Morphable Model optimization algorithm.
     """
+    def __str__(self):
+        return "Project Out Forward Additive"
+
     def _precompute(self):
         # call super method
         super(ProjectOutForwardAdditive, self)._precompute()
@@ -124,14 +128,15 @@ class ProjectOutForwardAdditive(LucasKanade):
             instance_in_image = camera.apply(instance)
 
             # Compute indices locations for sampling
-            (vertex_indices, bcoords, tri_indices,
-             yx) = self.visible_sample_points(instance_in_image, image.shape)
+            (vert_indices, bcoords, tri_indices,
+             yx) = visible_sample_points(instance_in_image, image.shape,
+                                         self.n_samples)
 
             # Warp the mesh with the view matrix (rotation + translation)
             instance_w = camera.view_transform.apply(instance.points)
 
             # Sample all the terms from the model part at the sample locations
-            warped_uv = self.sample(instance_w, bcoords, vertex_indices)
+            warped_uv = sample_at_bc_vi(instance_w, bcoords, vert_indices)
             texture_pc_uv = self.model.sample_texture_model(bcoords,
                                                             tri_indices)
             texture_pc_uv = texture_pc_uv.reshape((-1, self.m))
@@ -144,8 +149,8 @@ class ProjectOutForwardAdditive(LucasKanade):
 
             # Reshape shape basis after sampling
             # shape_pc_uv: (n_samples, xyz, shape_components)
-            shape_pc_uv = (self.sample(self.shape_pc, bcoords, vertex_indices)
-                               .reshape([self.n_samples, 3, -1]))
+            shape_pc_uv = (sample_at_bc_vi(self.shape_pc, bcoords, vert_indices)
+                           .reshape([self.n_samples, 3, -1]))
 
             # Sample all the terms from the image part at the sample locations
             # img_uv: (channels, samples)
@@ -239,6 +244,3 @@ class ProjectOutForwardAdditive(LucasKanade):
             image=image, initial_mesh=initial_mesh.rescale_texture(0., 1.),
             initial_camera_transform=camera_per_iter[0], gt_mesh=gt_mesh,
             costs=costs)
-
-    def __str__(self):
-        return "Project Out Forward Additive"

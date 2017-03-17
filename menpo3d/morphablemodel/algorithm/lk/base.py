@@ -2,10 +2,10 @@ import numpy as np
 
 from menpo.feature import gradient as fast_gradient
 from menpo.image import Image
-
-from menpo3d.morphablemodel.algorithm.derivatives import (
-    d_camera_d_camera_parameters, d_camera_d_shape_parameters)
 from menpo3d.rasterize import rasterize_barycentric_coordinates
+
+from ..derivatives import (d_camera_d_camera_parameters,
+                           d_camera_d_shape_parameters)
 
 
 def camera_parameters_update(c, dc):
@@ -39,7 +39,7 @@ def gradient_xy(image):
     return grad_x, grad_y
 
 
-def sample(x, bcoords, vertex_indices):
+def sample_at_bc_vi(x, bcoords, vertex_indices):
     per_vertex_per_pixel = x[vertex_indices]
     return np.sum(per_vertex_per_pixel * bcoords[..., None], axis=1)
 
@@ -120,12 +120,6 @@ class LucasKanade(object):
         :type: `int`
         """
         return self.model.n_channels
-
-    def sample(self, x, bcoords, vertex_indices):
-        return sample(x, bcoords, vertex_indices)
-
-    def gradient(self, image):
-        return gradient_xy(image)
 
     def visible_sample_points(self, instance_in_img, image_shape):
         return visible_sample_points(instance_in_img, image_shape,
