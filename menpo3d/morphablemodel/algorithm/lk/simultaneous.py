@@ -1,11 +1,11 @@
 import numpy as np
 
-from menpo.visualize import print_dynamic, bytes_str
+from menpo.visualize import print_dynamic
 from menpo3d.morphablemodel.result import MMAlgorithmResult
 
 from ..derivatives import (d_camera_d_camera_parameters,
                            d_camera_d_shape_parameters)
-from .base import camera_parameters_update, LucasKanade, J_lms
+from .base import camera_parameters_update, LucasKanade, J_lms, gradient_xy
 
 
 def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
@@ -37,6 +37,43 @@ def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
     return reconstruction_prior_weight * J, n_camera_parameters
 
 
+def solve(hessian, sd_error, reconstruction_prior_weight, n, m,
+          camera_update, focal_length_update, camera):
+    # Solve
+    ds = - np.linalg.solve(hessian, sd_error)
+
+    # Get shape parameters increment
+    d_shape = ds[:n]
+
+    # Initialize texture parameters update
+    d_texture = np.zeros(m)
+
+    # Get camera parameters increment
+    if camera_update:
+        # Keep the rest
+        ds = ds[n:]
+
+        # If focal length is not updated, then set its increment to zero
+        if not focal_length_update:
+            ds = np.insert(ds, 0, [0.])
+
+        # Set increment of the 1st quaternion to one
+        ds = np.insert(ds, 1, [1.])
+
+        # Get camera parameters update
+        d_camera = ds[:camera.n_parameters]
+
+        # Get texture parameters increment
+        if reconstruction_prior_weight is not None:
+            d_texture = ds[camera.n_parameters:]
+    else:
+        d_camera = None
+        if reconstruction_prior_weight is not None:
+            d_texture = ds[n:]
+
+    return d_shape, d_camera, d_texture
+
+
 class SimultaneousForwardAdditive(LucasKanade):
     r"""
     Simultaneous Forward Additive Morphable Model optimization algorithm.
@@ -66,7 +103,7 @@ class SimultaneousForwardAdditive(LucasKanade):
                                        texture_weights=texture_parameters)
 
         # Compute input image gradient
-        grad_x, grad_y = self.gradient(image)
+        grad_x, grad_y = gradient_xy(image)
 
         # Initialize lists
         shape_parameters_per_iter = [shape_parameters]
@@ -170,9 +207,9 @@ class SimultaneousForwardAdditive(LucasKanade):
                     texture_prior_weight, landmarks_prior_weight))
 
             # Solve to find the increment of parameters
-            d_shape, d_camera, d_texture = self.solve(
-                hessian, sd_error, reconstruction_weight, camera_update,
-                focal_length_update, camera)
+            d_shape, d_camera, d_texture = solve(
+                hessian, sd_error, reconstruction_weight, self.n,
+                self.m, camera_update, focal_length_update, camera)
 
             # Update parameters
             shape_parameters += d_shape
@@ -205,42 +242,6 @@ class SimultaneousForwardAdditive(LucasKanade):
             image=image, initial_mesh=initial_mesh.rescale_texture(0., 1.),
             initial_camera_transform=camera_per_iter[0], gt_mesh=gt_mesh,
             costs=costs)
-
-    def solve(self, hessian, sd_error, reconstruction_prior_weight,
-              camera_update, focal_length_update, camera):
-        # Solve
-        ds = - np.linalg.solve(hessian, sd_error)
-
-        # Get shape parameters increment
-        d_shape = ds[:self.n]
-
-        # Initialize texture parameters update
-        d_texture = np.zeros(self.m)
-
-        # Get camera parameters increment
-        if camera_update:
-            # Keep the rest
-            ds = ds[self.n:]
-
-            # If focal length is not updated, then set its increment to zero
-            if not focal_length_update:
-                ds = np.insert(ds, 0, [0.])
-
-            # Set increment of the 1st quaternion to one
-            ds = np.insert(ds, 1, [1.])
-
-            # Get camera parameters update
-            d_camera = ds[:camera.n_parameters]
-
-            # Get texture parameters increment
-            if reconstruction_prior_weight is not None:
-                d_texture = ds[camera.n_parameters:]
-        else:
-            d_camera = None
-            if reconstruction_prior_weight is not None:
-                d_texture = ds[self.n:]
-
-        return d_shape, d_camera, d_texture
 
     def __str__(self):
         return "Simultaneous Forward Additive"

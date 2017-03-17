@@ -28,13 +28,13 @@ def quaternion_multiply(current_q, increment_q):
                       x1*y0 - y1*x0 + z1*w0 + w1*z0], dtype=np.float64)
 
 
-def gradient_xy(image, n_channels):
+def gradient_xy(image):
     # Compute the gradient of the image
     grad = fast_gradient(image)
 
-    # Create gradient image for X and Y
-    grad_y = Image(grad.pixels[:n_channels])
-    grad_x = Image(grad.pixels[n_channels:])
+    # Slice off the gradient for X and Y separately
+    grad_y = Image(grad.pixels[:image.n_channels])
+    grad_x = Image(grad.pixels[image.n_channels:])
 
     return grad_x, grad_y
 
@@ -125,7 +125,7 @@ class LucasKanade(object):
         return sample(x, bcoords, vertex_indices)
 
     def gradient(self, image):
-        return gradient_xy(image, self.n_channels)
+        return gradient_xy(image)
 
     def visible_sample_points(self, instance_in_img, image_shape):
         return visible_sample_points(instance_in_img, image_shape,

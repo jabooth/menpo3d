@@ -7,7 +7,7 @@ import menpo3d.checks as checks
 from menpo3d.camera import PerspectiveCamera, OrthographicCamera
 
 from .algorithm import ProjectOutForwardAdditive
-from .result import MMResult, MMAlgorithmResult
+from .result import MMResult
 from .shapemodel import ShapeModel
 
 
@@ -129,24 +129,12 @@ class MMFitter(object):
         return AlignmentSimilarity(template_shape.bounding_box(),
                                    bbox).apply(template_shape)
 
-    def _fit(self, image, camera, **kwargs):
-        algorithm_results = []
-        # The fit generator provides either preliminary results (in the middle
-        # of the fit process) or a MMAlgorithmResult (after a full scale is
-        # finished fitting).
-        for x in self._fit_generator(image, camera, **kwargs):
-            if isinstance(x, MMAlgorithmResult):
-                algorithm_results.append(x)
-        return algorithm_results
-
-    def _fit_generator(self, image, camera, instance=None, gt_mesh=None,
-                       max_iters=50, camera_update=False,
-                       focal_length_update=False, reconstruction_weight=1.,
-                       shape_prior_weight=None, texture_prior_weight=None,
-                       landmarks_prior_weight=None, landmarks=None,
-                       return_costs=False,
-                       initial_shape_params=None,
-                       verbose=False):
+    def _fit(self, image, camera, instance=None, gt_mesh=None,
+             max_iters=50, camera_update=False,
+             focal_length_update=False, reconstruction_weight=1.,
+             shape_prior_weight=None, texture_prior_weight=None,
+             landmarks_prior_weight=None, landmarks=None,
+             return_costs=False, verbose=False):
         # The fitter
         # Check provided instance
         if instance is None:
@@ -174,19 +162,22 @@ class MMFitter(object):
                 texture_prior_weight[i] = None
 
         # Main loop at each scale level
+        results = []
         for i in range(self.n_scales):
             # Run algorithm
-            yield from self.algorithms[i].run(
-                image, instance, camera, gt_mesh=gt_mesh,
-                max_iters=max_iters[i], camera_update=camera_update,
+            results.append(self.algorithms[i].run(
+                image, instance, camera, landmarks=landmarks,
+                camera_update=camera_update,
                 focal_length_update=focal_length_update,
                 reconstruction_weight=reconstruction_weight[i],
                 shape_prior_weight=shape_prior_weight[i],
                 texture_prior_weight=texture_prior_weight[i],
                 landmarks_prior_weight=landmarks_prior_weight[i],
-                landmarks=landmarks, return_costs=return_costs,
-                initial_shape_params=initial_shape_params,
-                verbose=verbose)
+                gt_mesh=gt_mesh,
+                max_iters=max_iters[i],
+                return_costs=return_costs,
+                verbose=verbose))
+        return results
 
     def fit_from_camera(self, image, camera, instance=None, gt_mesh=None,
                         max_iters=50, camera_update=False,
@@ -233,7 +224,6 @@ class MMFitter(object):
                        texture_prior_weight=1., landmarks_prior_weight=1.,
                        return_costs=False, distortion_coeffs=None,
                        init_shape_params_from_lms=False,
-                       initial_shape_params=None,
                        focal_length=None,
                        verbose=False):
         (rescaled_image, rescaled_initial_shape, affine_transform,
@@ -252,43 +242,12 @@ class MMFitter(object):
             texture_prior_weight=texture_prior_weight,
             landmarks_prior_weight=landmarks_prior_weight,
             landmarks=rescaled_initial_shape, return_costs=return_costs,
-            initial_shape_params=initial_shape_params,
             verbose=verbose)
 
         # Return multi-scale fitting result
         return self._fitter_result(
             image=image, algorithm_results=algorithm_results,
             affine_transform=affine_transform, gt_mesh=gt_mesh)
-
-    def fit_from_shape_gen(self, image, initial_shape, gt_mesh=None,
-                          max_iters=50,
-                       camera_update=True, focal_length_update=False,
-                       reconstruction_weight=1.,
-                       shape_prior_weight=(1, 1, 2, 2),
-                       texture_prior_weight=1., landmarks_prior_weight=1.,
-                       return_costs=False, distortion_coeffs=None,
-                       init_shape_params_from_lms=False,
-                       initial_shape_params=None,
-                       focal_length=None,
-                       verbose=False):
-        (rescaled_image, rescaled_initial_shape, affine_transform,
-         instance, camera) = self._init_fit_from_shape(
-            image, initial_shape, distortion_coeffs=distortion_coeffs,
-            init_shape_params_from_lms=init_shape_params_from_lms,
-            verbose=verbose, focal_length=focal_length)
-
-        # Execute multi-scale fitting
-        return self._fit_generator(
-            rescaled_image, camera, instance=instance, gt_mesh=gt_mesh,
-            max_iters=max_iters, camera_update=camera_update,
-            focal_length_update=focal_length_update,
-            reconstruction_weight=reconstruction_weight,
-            shape_prior_weight=shape_prior_weight,
-            texture_prior_weight=texture_prior_weight,
-            landmarks_prior_weight=landmarks_prior_weight,
-            landmarks=rescaled_initial_shape, return_costs=return_costs,
-            initial_shape_params=initial_shape_params,
-            verbose=verbose)
 
     def _init_fit_from_shape(self, image, initial_shape,
                              distortion_coeffs=None,
@@ -333,60 +292,6 @@ class MMFitter(object):
             instance = None
         return (rescaled_image, rescaled_initial_shape, affine_transform,
                 instance, camera)
-
-    def fit_video_from_shapes(self, video, initial_shapes, max_iters=50,
-                              camera_update=True, focal_length_update=False,
-                              reconstruction_weight=1., shape_prior_weight=1.,
-                              texture_prior_weight=1.,
-                              landmarks_prior_weight=1.,
-                              return_costs=False, distortion_coeffs=None,
-                              init_shape_params_from_lms=False, verbose=False):
-        # In this variant we prepare the per-frame fit as we do in
-        # fit_from_shape but then simultaneously fit many frames at once.
-        # To do this we hold onto the fitting generators from the algorithms...
-        fits = []
-        for image, initial_shape in zip(video, initial_shapes):
-            (rescaled_image, rescaled_initial_shape, affine_transform,
-             instance, camera) = self._init_fit_from_shape(
-                image, initial_shape, distortion_coeffs=distortion_coeffs,
-                init_shape_params_from_lms=init_shape_params_from_lms,
-                verbose=verbose)
-            # Execute multi-scale fitting
-            fits.append(self._fit_generator(
-                rescaled_image, camera, instance=instance,
-                max_iters=max_iters, camera_update=camera_update,
-                focal_length_update=focal_length_update,
-                reconstruction_weight=reconstruction_weight,
-                shape_prior_weight=shape_prior_weight,
-                texture_prior_weight=texture_prior_weight,
-                landmarks_prior_weight=landmarks_prior_weight,
-                landmarks=rescaled_initial_shape, return_costs=return_costs))
-
-        # At this stage, we haven't actually started any fits per image. Now
-        # we go into a loop where we keep incremented each image fit in
-        # lockstep. After one iteration of each fit, we have the opportunity
-        # to change the hessian/sd_error.
-
-        # initialize the coroutine results.
-        x = [None] * len(fits)
-        while True:
-            try:
-                # First time - start the fit. Future runs - feed back in an
-                # updated hessian/sd_error.
-                x = [f.send(xi) for xi, f in zip(x, fits)]
-            except StopIteration:
-                # Fitting finished - results are provided
-                break
-            else:
-                if isinstance(x[0], dict):
-                    # fitting is still on-going, here's all the intermediaries
-                    # to manipulate in a groupwise manner. They will be fed
-                    # back in the next loop around the iteration.
-                    n = x[0]['algorithm'].n
-                    hessians = [i['hessian'] for i in x][:n, :n]
-
-                    # TODO update the hessians to fix ID across frames.
-        return x
 
     def _fitter_result(self, image, algorithm_results, affine_transform,
                        gt_mesh=None):

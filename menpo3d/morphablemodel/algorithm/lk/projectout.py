@@ -1,11 +1,11 @@
 import numpy as np
 
-from menpo.visualize import print_dynamic, bytes_str
+from menpo.visualize import print_dynamic
 from menpo3d.morphablemodel.result import MMAlgorithmResult
 
 from ..derivatives import (d_camera_d_camera_parameters,
                            d_camera_d_shape_parameters)
-from .base import camera_parameters_update, LucasKanade, J_lms
+from .base import camera_parameters_update, LucasKanade, J_lms, gradient_xy
 
 
 def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
@@ -39,6 +39,33 @@ def project_out(J, U):
     return J - tmp.dot(U.T)
 
 
+def solve(hessian, sd_error, n, camera_update, focal_length_update):
+    # Solve
+    ds = - np.linalg.solve(hessian, sd_error)
+
+    # Get shape parameters increment
+    d_shape = ds[:n]
+
+    # Get camera parameters increment
+    if camera_update:
+        # Keep the rest
+        ds = ds[n:]
+
+        # If focal length is not updated, then set its increment to zero
+        if not focal_length_update:
+            ds = np.insert(ds, 0, [0.])
+
+        # Set increment of the 1st quaternion to one
+        ds = np.insert(ds, 1, [1.])
+
+        # Get camera parameters update
+        d_camera = ds
+    else:
+        d_camera = None
+
+    return d_shape, d_camera
+
+
 class ProjectOutForwardAdditive(LucasKanade):
     r"""
     Project Out Forward Additive Morphable Model optimization algorithm.
@@ -48,12 +75,12 @@ class ProjectOutForwardAdditive(LucasKanade):
         super(ProjectOutForwardAdditive, self)._precompute()
         self.texture_T = self.model.texture_model.components.T
 
-    def run(self, image, initial_mesh, camera, gt_mesh=None, max_iters=20,
+    def run(self, image, initial_mesh, camera, landmarks=None,
             camera_update=False, focal_length_update=False,
             reconstruction_weight=1., shape_prior_weight=1.,
-            texture_prior_weight=1., landmarks=None,
-            landmarks_prior_weight=1., return_costs=False, verbose=True,
-            initial_shape_params=None):
+            texture_prior_weight=1.,  landmarks_prior_weight=1.,
+            gt_mesh=None, max_iters=20, return_costs=False, verbose=True):
+
         # Parse landmarks prior options
         if landmarks is None or landmarks_prior_weight is None:
             landmarks_prior_weight = None
@@ -65,13 +92,7 @@ class ProjectOutForwardAdditive(LucasKanade):
         # Retrieve camera parameters from the provided camera object.
         # Project provided instance to retrieve shape and texture parameters.
         camera_parameters = camera.as_vector()
-        if initial_shape_params is not None:
-            if verbose:
-                print('Using initial shape parameters')
-            shape_parameters = initial_shape_params
-            initial_mesh.points = self.model.shape_model.instance(shape_parameters).points
-        else:
-            shape_parameters = self.model.shape_model.project(initial_mesh)
+        shape_parameters = self.model.shape_model.project(initial_mesh)
         texture_parameters = self.model.project_instance_on_texture_model(
             initial_mesh)
 
@@ -80,7 +101,7 @@ class ProjectOutForwardAdditive(LucasKanade):
                                        texture_weights=texture_parameters)
 
         # Compute input image gradient
-        grad_x, grad_y = self.gradient(image)
+        grad_x, grad_y = gradient_xy(image)
 
         # Initialize lists
         shape_parameters_per_iter = [shape_parameters]
@@ -144,9 +165,6 @@ class ProjectOutForwardAdditive(LucasKanade):
                     reconstruction_weight)
                 hessian = sd.dot(sd.T)
                 sd_error = sd.dot(img_error_uv)
-                if verbose:
-                    print(sd.shape)
-                    print(bytes_str(sd.nbytes))
             else:
                 n_camera_parameters = 0
                 if camera_update:
@@ -183,23 +201,16 @@ class ProjectOutForwardAdditive(LucasKanade):
                 sd_error[:idx] = landmarks_prior_weight * sd_lms.dot(lms_error)
 
             if return_costs:
-                # print('\n\n')
-                # print(img_error_uv.shape)
-                # # samples channels n components
-                # print(texture_pc_uv.shape)
-
                 texture_parameters = np.linalg.lstsq(texture_pc_uv,
                                                      img_error_uv)[0]
-                # print('texture_parameters: {}'.format(texture_parameters))
                 costs.append(self.compute_cost(
                     img_error_uv, lms_error, shape_parameters,
                     texture_parameters, shape_prior_weight,
                     texture_prior_weight, landmarks_prior_weight))
 
-            yield locals()
             # Solve to find the increment of parameters
-            d_shape, d_camera = self.solve(hessian, sd_error, camera_update,
-                                           focal_length_update)
+            d_shape, d_camera = solve(hessian, sd_error, self.n,
+                                      camera_update, focal_length_update)
 
             # Update parameters
             shape_parameters += d_shape
@@ -221,39 +232,13 @@ class ProjectOutForwardAdditive(LucasKanade):
             # Increase iteration counter
             k += 1
 
-        yield MMAlgorithmResult(
+        return MMAlgorithmResult(
             shape_parameters=shape_parameters_per_iter,
             texture_parameters=texture_parameters_per_iter,
             meshes=instance_per_iter, camera_transforms=camera_per_iter,
             image=image, initial_mesh=initial_mesh.rescale_texture(0., 1.),
             initial_camera_transform=camera_per_iter[0], gt_mesh=gt_mesh,
             costs=costs)
-
-    def solve(self, hessian, sd_error, camera_update, focal_length_update):
-        # Solve
-        ds = - np.linalg.solve(hessian, sd_error)
-
-        # Get shape parameters increment
-        d_shape = ds[:self.n]
-
-        # Get camera parameters increment
-        if camera_update:
-            # Keep the rest
-            ds = ds[self.n:]
-
-            # If focal length is not updated, then set its increment to zero
-            if not focal_length_update:
-                ds = np.insert(ds, 0, [0.])
-
-            # Set increment of the 1st quaternion to one
-            ds = np.insert(ds, 1, [1.])
-
-            # Get camera parameters update
-            d_camera = ds
-        else:
-            d_camera = None
-
-        return d_shape, d_camera
 
     def __str__(self):
         return "Project Out Forward Additive"

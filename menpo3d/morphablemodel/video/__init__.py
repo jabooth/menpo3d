@@ -220,7 +220,7 @@ def fit_video(frames, cameras, shape_parameters,
     lms_points = image.landmarks[None].points[:, [1, 0]]
 
     # Compute input image gradient
-    grad_x, grad_y = gradient_xy(image, mm.n_channels)
+    grad_x, grad_y = gradient_xy(image)
 
     for _ in print_progress(list(range(n_iters))):
         shape_parameters, camera_parameters = single_iteration_update(
