@@ -4,9 +4,8 @@ from menpo.visualize import print_progress
 from ..algorithm.derivatives import (d_camera_d_shape_parameters,
                                      d_camera_d_camera_parameters)
 from ..algorithm.lk import camera_parameters_update
-from ..algorithm.lk.base import (gradient_xy, sample_at_bc_vi,
-                                 visible_sample_points)
-from ..algorithm.lk.projectout import project_out
+from ..algorithm.lk.base import gradient_xy
+from ..algorithm.lk.projectout import project_out, sample_all_terms
 
 
 def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
@@ -49,56 +48,27 @@ def J_lms(camera, warped_uv, shape_pc_uv, focal_length_update=False):
 
 
 def jacobians(shape_parameters, camera_parameters,
-              image, lms_points, model, id_ind, exp_ind, camera,
+              image, lms_points, mm, id_ind, exp_ind, camera,
               grad_x, grad_y, shape_pc, shape_pc_lms, n_samples):
 
-    instance = model.shape_model.instance(shape_parameters)
+    instance = mm.shape_model.instance(shape_parameters)
     camera = camera.from_vector(camera_parameters)
-    instance_in_image = camera.apply(instance)
-    m = model.texture_model.n_active_components
 
-    # Compute indices locations for sampling
-    (vertex_indices, bcoords, tri_indices,
-     yx) = visible_sample_points(instance_in_image, image.shape, n_samples)
-
-    # Warp the mesh with the view matrix (rotation + translation)
-    instance_w = camera.view_transform.apply(instance.points)
-
-    # Sample all the terms from the model part at the sample locations
-    warped_uv = sample_at_bc_vi(instance_w, bcoords, vertex_indices)
-    texture_pc_uv = model.sample_texture_model(bcoords,
-                                               tri_indices).reshape((-1, m))
-    m_texture_uv = (
-        model.instance().sample_texture_with_barycentric_coordinates(
-            bcoords, tri_indices).T)
-
-    # Reshape shape basis after sampling
-    # shape_pc_uv: (n_samples, xyz, shape_components)
-    shape_pc_uv = sample_at_bc_vi(shape_pc, bcoords, vertex_indices).reshape([n_samples,
-                                                                              3, -1])
-
-    # Sample all the terms from the image part at the sample locations
-    # img_uv: (channels, samples)
-    img_uv = image.sample(yx)
-    grad_x_uv = grad_x.sample(yx)
-    grad_y_uv = grad_y.sample(yx)
-
-    # Compute error
-    # img_error_uv: (channels x samples,)
-    img_error_uv = (img_uv - m_texture_uv).ravel()
+    (instance_w, instance_in_image, warped_uv, shape_pc_uv, texture_pc_uv,
+     grad_x_uv, grad_y_uv,
+     img_error_uv) = sample_all_terms(instance, image, camera, mm,
+                                      grad_x, grad_y, shape_pc, n_samples)
 
     # Data term Jacobian
-    sd, n_camera_parameters = J_data(
-        camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
-        grad_y_uv)
+    sd, n_camera_parameters = J_data(camera, warped_uv, shape_pc_uv,
+                                     texture_pc_uv, grad_x_uv, grad_y_uv)
 
     # Landmarks term Jacobian
     # Get projected instance on landmarks and error term
-    warped_lms = instance_in_image.points[model.model_landmarks_index]
+    warped_lms = instance_in_image.points[mm.model_landmarks_index]
     lms_error = (warped_lms[:, [1, 0]] - lms_points).T.ravel()
-    warped_view_lms = instance_w[model.model_landmarks_index]
-    sd_lms, n_camera_parameters = J_lms(
-        camera, warped_view_lms, shape_pc_lms)
+    warped_view_lms = instance_w[mm.model_landmarks_index]
+    sd_lms, n_camera_parameters = J_lms(camera, warped_view_lms, shape_pc_lms)
 
     cam_n_params = camera_parameters.shape[0]
     # form the main two Jacobians...
