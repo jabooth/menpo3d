@@ -67,8 +67,8 @@ def solve(hessian, sd_error, n, camera_update, focal_length_update):
     return d_shape, d_camera
 
 
-def sample_all_terms(instance, image, camera, mm, grad_x, grad_y, shape_pc,
-                     n_samples):
+def sample_uv_terms(instance, image, camera, mm, shape_pc, grad_x, grad_y,
+                    n_samples):
     # subsample all the terms we need to compute a project out update.
 
     # Apply camera projection on current instance
@@ -108,8 +108,8 @@ def sample_all_terms(instance, image, camera, mm, grad_x, grad_y, shape_pc,
     # img_error_uv: (channels x samples,)
     img_error_uv = (img_uv - m_texture_uv).ravel()
 
-    return (instance_w, instance_in_image, warped_uv, shape_pc_uv,
-            texture_pc_uv, grad_x_uv, grad_y_uv, img_error_uv)
+    return (instance_w, instance_in_image, warped_uv, img_error_uv,
+            shape_pc_uv, texture_pc_uv, grad_x_uv, grad_y_uv)
 
 
 class ProjectOutForwardAdditive(LucasKanade):
@@ -170,11 +170,11 @@ class ProjectOutForwardAdditive(LucasKanade):
             if verbose:
                 print_dynamic("{}/{}".format(k + 1, max_iters))
 
-            (instance_w, instance_in_image, warped_uv, shape_pc_uv,
-             texture_pc_uv, grad_x_uv, grad_y_uv,
-             img_error_uv) = sample_all_terms(
-                instance, image, camera, self.model, grad_x, grad_y,
-                self.shape_pc, self.n_samples)
+            (instance_w, instance_in_image, warped_uv, img_error_uv,
+             shape_pc_uv, texture_pc_uv, grad_x_uv, grad_y_uv
+             ) = sample_uv_terms(
+                instance, image, camera, self.model, self.shape_pc,
+                grad_x, grad_y, self.n_samples)
 
             # Compute Jacobian, SD and Hessian of data term
             if reconstruction_weight is not None:
