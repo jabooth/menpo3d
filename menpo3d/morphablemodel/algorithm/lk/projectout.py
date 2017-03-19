@@ -10,8 +10,7 @@ from .base import (camera_parameters_update, gradient_xy, J_lms, LucasKanade,
 
 
 def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
-           grad_y_uv, camera_update, focal_length_update,
-           reconstruction_prior_weight):
+           grad_y_uv, camera_update, focal_length_update):
     # Compute derivative of camera wrt shape and camera parameters
     dp_da_dr = d_camera_d_shape_parameters(camera, warped_uv, shape_pc_uv)
     n_camera_parameters = 0
@@ -32,7 +31,7 @@ def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
     PJ = project_out(J, texture_pc_uv)
 
     # Concatenate to create the data term steepest descent
-    return reconstruction_prior_weight * PJ, n_camera_parameters
+    return PJ, n_camera_parameters
 
 
 def project_out(J, U):
@@ -180,8 +179,9 @@ class ProjectOutForwardAdditive(LucasKanade):
             if reconstruction_weight is not None:
                 sd, n_camera_parameters = J_data(
                     camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
-                    grad_y_uv, camera_update, focal_length_update,
-                    reconstruction_weight)
+                    grad_y_uv, camera_update, focal_length_update)
+                # TODO this doesn't seem balanced with the other weights?
+                sd *= reconstruction_weight
                 hessian = sd.dot(sd.T)
                 sd_error = sd.dot(img_error_uv)
             else:

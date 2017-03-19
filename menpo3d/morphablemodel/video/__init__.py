@@ -113,7 +113,7 @@ def fit_video(images, cameras, mm, id_indices, exp_indices, p, qs,
     shape_pc = mm.shape_model.components.T.reshape([n_points, -1])
     shape_pc_lms = shape_pc.reshape([n_points, 3, -1])[mm.model_landmarks_index]
 
-    print('Initializing Jacobian for frame....')
+    print('Initializing Hessian/JTe for frame...')
     H, JTe = initialize_hessian_and_JTe(c_id, c_exp, c_sm, n_p, n_q, n_c, p, qs,
                                         n_frames)
     print('H: {} ({})'.format(H.shape, bytes_str(H.nbytes)))

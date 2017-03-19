@@ -48,7 +48,7 @@ def insert_id_constraint_to_e(e, p, c_id, n_sites_per_frame, n_frames):
 
 def insert_exp_constraint_to_e(e, qs, c_exp, n_p, n_sites_per_frame, n_frames):
     offset = n_sites_per_frame * n_frames + n_p
-    e[offset:offset + qs.size] = -np.sqrt(c_exp) * qs
+    e[offset:offset + qs.ravel().size] = -np.sqrt(c_exp) * qs.ravel()
 
 
 def insert_smoothness_constraint_to_e(e, qs, c_sm, n_p, n_q, n_sites_per_frame,
@@ -56,10 +56,9 @@ def insert_smoothness_constraint_to_e(e, qs, c_sm, n_p, n_q, n_sites_per_frame,
     offset = n_frames * n_sites_per_frame + n_p + n_frames * n_q
 
     # form the central difference scheme for qs:
-    qsr = qs.reshape(n_frames, n_q)
-    qs_a = qsr[:-2]
-    qs_b = qsr[1:-1]
-    qs_c = qsr[2:]
+    qs_a = qs[:-2]
+    qs_b = qs[1:-1]
+    qs_c = qs[2:]
 
     smoothness = (-np.sqrt(c_sm) * (qs_a - 2 * qs_b + qs_c)).ravel()
     e[offset:offset + smoothness.size] = smoothness
