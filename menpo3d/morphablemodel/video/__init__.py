@@ -102,8 +102,8 @@ def fit_video(images, cameras, mm, id_indices, exp_indices, p, qs,
     n_q = len(exp_indices)
     n_c = cameras[0].n_parameters
 
-    n_pixels_per_frame = n_channels * n_samples
-    n_sites_per_frame = n_pixels_per_frame + (2 * n_lms)
+    n_elements_per_frame = n_channels * n_samples
+    n_sites_per_frame = n_elements_per_frame + (2 * n_lms)
 
     n_points = mm.shape_model.template_instance.n_points
 
@@ -136,8 +136,10 @@ def fit_video(images, cameras, mm, id_indices, exp_indices, p, qs,
                       mm, id_indices, exp_indices, camera,
                       grad_x, grad_y,
                       shape_pc, shape_pc_lms, n_samples)
-        insert_frame_to_J(J, j, i, c_l, n_p, n_q, n_pixels_per_frame, n_frames)
-        insert_frame_to_e(e, j, i, n_sites_per_frame)
+        return j
+        insert_frame_to_J(J, j, i, c_l, n_p, n_q, n_elements_per_frame,
+                          n_frames)
+        insert_frame_to_e(e, j, i, n_elements_per_frame, n_sites_per_frame, n_lms)
     print('Converting J to efficient format...')
     J = J.tocsr()
     print('Calculating H = J.T.dot(J)...')
