@@ -1,14 +1,14 @@
 import numpy as np
 import scipy.sparse as sp
-from menpo.visualize import print_progress
+from menpo.visualize import print_progress, bytes_str
 
 from ..algorithm.derivatives import (d_camera_d_shape_parameters,
                                      d_camera_d_camera_parameters)
 from ..algorithm.lk import camera_parameters_update
 from ..algorithm.lk.base import gradient_xy
 from ..algorithm.lk.projectout import project_out, sample_uv_terms
-from .jacobian import (initialize_jacobian_and_error,
-                       insert_frame_to_e, insert_frame_to_J)
+from .hessian import (initialize_hessian_and_JTe, insert_frame_to_H,
+                      insert_frame_to_JTe)
 
 
 def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
@@ -114,11 +114,11 @@ def fit_video(images, cameras, mm, id_indices, exp_indices, p, qs,
     shape_pc_lms = shape_pc.reshape([n_points, 3, -1])[mm.model_landmarks_index]
 
     print('Initializing Jacobian for frame....')
-    J, e = initialize_jacobian_and_error(c_id, c_exp, c_sm, n_p, n_q, n_c, p,
-                                         qs, n_sites_per_frame, n_frames)
-    print('J.shape: {}'.format(J.shape))
+    H, JTe = initialize_hessian_and_JTe(c_id, c_exp, c_sm, n_p, n_q, n_c, p, qs,
+                                        n_frames)
+    print('H: {} ({})'.format(H.shape, bytes_str(H.nbytes)))
 
-    for (i, image), camera, q in zip(enumerate(print_progress(images)),
+    for (f, image), camera, q in zip(enumerate(print_progress(images)),
                                      cameras, qs):
         camera_params = camera.as_vector()
 
@@ -136,19 +136,12 @@ def fit_video(images, cameras, mm, id_indices, exp_indices, p, qs,
                       mm, id_indices, exp_indices, camera,
                       grad_x, grad_y,
                       shape_pc, shape_pc_lms, n_samples)
-        return j
-        insert_frame_to_J(J, j, i, c_l, n_p, n_q, n_elements_per_frame,
-                          n_frames)
-        insert_frame_to_e(e, j, i, n_elements_per_frame, n_sites_per_frame, n_lms)
-    print('Converting J to efficient format...')
-    J = J.tocsr()
-    print('Calculating H = J.T.dot(J)...')
-    H = J.T.dot(J)
-    print('Calculating J.T.dot(e)...')
-    J_T_e = J.T.dot(e)
-
+        insert_frame_to_H(H, j, f, n_p, n_q, n_c, c_l, n_frames)
+        insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_l, n_frames)
+    print('Converting Hessian to sparse format')
+    H = sp.csr_matrix(H)
     print("Sparsity (prop. 0's) of H: {:.2%}".format(
         1 - (H.count_nonzero() / np.prod(np.array(H.shape)))))
     print('Solving for parameter update')
-    dp = sp.linalg.spsolve(H, J_T_e)
+    dp = sp.linalg.spsolve(H, JTe)
     return locals(), dp
