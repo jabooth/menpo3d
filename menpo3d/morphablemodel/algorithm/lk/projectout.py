@@ -12,22 +12,27 @@ from .base import (camera_parameters_update, gradient_xy, J_lms, LucasKanade,
 def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
            grad_y_uv, camera_update, focal_length_update):
     # Compute derivative of camera wrt shape and camera parameters
+    # 2 x n_s x n_samples
     dp_da_dr = d_camera_d_shape_parameters(camera, warped_uv, shape_pc_uv)
+
     n_camera_parameters = 0
     if camera_update:
+        # 2 x n_c x n_samples
         dp_dr = d_camera_d_camera_parameters(
             camera, warped_uv, with_focal_length=focal_length_update)
+
+        # 2 x (n_s + n_c) x n_samples
         dp_da_dr = np.hstack((dp_da_dr, dp_dr))
         n_camera_parameters = dp_dr.shape[1]
 
     # Multiply image gradient with camera derivative
-    permuted_grad_x = np.transpose(grad_x_uv[..., None], (0, 2, 1))
-    permuted_grad_y = np.transpose(grad_y_uv[..., None], (0, 2, 1))
-    J = permuted_grad_x * dp_da_dr[0] + permuted_grad_y * dp_da_dr[1]
+    # n_channels x n_s x n_samples
+    J = grad_x_uv[:, None] * dp_da_dr[0] + grad_y_uv[:, None] * dp_da_dr[1]
 
     # Project-out
-    n_params = J.shape[1]
-    J = np.transpose(J, (1, 0, 2)).reshape(n_params, -1)
+    n_s = J.shape[1]
+    # n_s x (n_channels x n_samples)
+    J = np.transpose(J, (1, 0, 2)).reshape(n_s, -1)
     PJ = project_out(J, texture_pc_uv)
 
     # Concatenate to create the data term steepest descent
@@ -111,6 +116,48 @@ def sample_uv_terms(instance, image, camera, mm, shape_pc, grad_x, grad_y,
             shape_pc_uv, texture_pc_uv, grad_x_uv, grad_y_uv)
 
 
+def build_H_and_JTe(camera, camera_update, focal_length_update, n_s,
+                    reconstruction_weight, warped_uv, img_error_uv,
+                    shape_pc_uv, texture_pc_uv, grad_x_uv, grad_y_uv):
+
+    # Compute Jacobian, SD and Hessian of data term
+    if reconstruction_weight is not None:
+        JT, n_c = J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv,
+                         grad_x_uv, grad_y_uv, camera_update,
+                         focal_length_update)
+        # TODO this doesn't seem balanced with the other weights?
+        JT *= reconstruction_weight
+        H = JT.dot(JT.T)
+        JTe = JT.dot(img_error_uv)
+    else:
+        n_c = 0
+        if camera_update:
+            if focal_length_update:
+                n_c = camera.n_parameters - 1
+            else:
+                n_c = camera.n_parameters - 2
+        H = np.zeros((n_s + n_c, n_s + n_c))
+        JTe = np.zeros(n_s + n_c)
+
+    return H, JTe
+
+
+def insert_lms_into_H_JTe(H, JTe, camera, camera_update, focal_length_update,
+                          n_s, instance_w, instance_in_image, shape_pc_lms,
+                          lms_points, lm_index, landmarks_prior_weight):
+    # Get projected instance on landmarks and error term
+    warped_lms = instance_in_image.points[lm_index]
+    lms_error = (warped_lms[:, [1, 0]] - lms_points).T.ravel()
+    warped_view_lms = instance_w[lm_index]
+
+    # Jacobian transposed wrt shape parameters
+    JT_lms, n_c = J_lms(camera, warped_view_lms, shape_pc_lms,
+                        camera_update, focal_length_update)
+    idx = n_s + n_c
+    H[:idx, :idx] += landmarks_prior_weight * JT_lms.dot(JT_lms.T)
+    JTe[:idx] = landmarks_prior_weight * JT_lms.dot(lms_error)
+
+
 class ProjectOutForwardAdditive(LucasKanade):
     r"""
     Project Out Forward Additive Morphable Model optimization algorithm.
@@ -129,6 +176,12 @@ class ProjectOutForwardAdditive(LucasKanade):
             texture_prior_weight=1.,  landmarks_prior_weight=1.,
             gt_mesh=None, max_iters=20, return_costs=False, verbose=True):
 
+        n_s = self.n
+        mm = self.model
+        n_samples = self.n_samples
+        shape_pc = self.shape_pc
+        shape_pc_lms = self.shape_pc_lms
+
         # Parse landmarks prior options
         if landmarks is None or landmarks_prior_weight is None:
             landmarks_prior_weight = None
@@ -140,13 +193,13 @@ class ProjectOutForwardAdditive(LucasKanade):
         # Retrieve camera parameters from the provided camera object.
         # Project provided instance to retrieve shape and texture parameters.
         camera_parameters = camera.as_vector()
-        shape_parameters = self.model.shape_model.project(initial_mesh)
-        texture_parameters = self.model.project_instance_on_texture_model(
+        shape_parameters = mm.shape_model.project(initial_mesh)
+        texture_parameters = mm.project_instance_on_texture_model(
             initial_mesh)
 
         # Reconstruct provided instance
-        instance = self.model.instance(shape_weights=shape_parameters,
-                                       texture_weights=texture_parameters)
+        instance = mm.instance(shape_weights=shape_parameters,
+                               texture_weights=texture_parameters)
 
         # Compute input image gradient
         grad_x, grad_y = gradient_xy(image)
@@ -169,78 +222,54 @@ class ProjectOutForwardAdditive(LucasKanade):
             if verbose:
                 print_dynamic("{}/{}".format(k + 1, max_iters))
 
+            # Sample all the terms at the UV sample locations
             (instance_w, instance_in_image, warped_uv, img_error_uv,
              shape_pc_uv, texture_pc_uv, grad_x_uv, grad_y_uv
-             ) = sample_uv_terms(
-                instance, image, camera, self.model, self.shape_pc,
-                grad_x, grad_y, self.n_samples)
+             ) = sample_uv_terms(instance, image, camera, mm,
+                                 shape_pc, grad_x, grad_y, n_samples)
 
-            # Compute Jacobian, SD and Hessian of data term
-            if reconstruction_weight is not None:
-                sd, n_camera_parameters = J_data(
-                    camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
-                    grad_y_uv, camera_update, focal_length_update)
-                # TODO this doesn't seem balanced with the other weights?
-                sd *= reconstruction_weight
-                hessian = sd.dot(sd.T)
-                sd_error = sd.dot(img_error_uv)
-            else:
-                n_camera_parameters = 0
-                if camera_update:
-                    if focal_length_update:
-                        n_camera_parameters = camera.n_parameters - 1
-                    else:
-                        n_camera_parameters = camera.n_parameters - 2
-                hessian = np.zeros((self.n+n_camera_parameters,
-                                    self.n+n_camera_parameters))
-                sd_error = np.zeros(self.n+n_camera_parameters)
+            # Form the key Hessian J.T.dot(e) term (reconstruction error)
+            H, JTe = build_H_and_JTe(
+                camera, camera_update, focal_length_update, n_s,
+                reconstruction_weight, warped_uv, img_error_uv, shape_pc_uv,
+                texture_pc_uv, grad_x_uv, grad_y_uv)
 
-            # Compute Jacobian, update SD and Hessian wrt shape prior
+            # Compute JT and update H/JTe wrt shape prior
             if shape_prior_weight is not None:
-                sd_shape = shape_prior_weight * self.J_shape_prior
-                hessian[:self.n, :self.n] += np.diag(sd_shape)
-                sd_error[:self.n] += sd_shape * shape_parameters
+                J_shape = shape_prior_weight * self.J_shape_prior
+                H[:n_s, :n_s] += np.diag(J_shape)
+                JTe[:n_s] += J_shape * shape_parameters
 
-            # Compute Jacobian, update SD and Hessian wrt landmarks prior
-            lms_error = None
+            # Compute JT and update H/JTe wrt landmarks prior
             if landmarks_prior_weight is not None:
-                # Get projected instance on landmarks and error term
-                warped_lms = instance_in_image.points[
-                    self.model.model_landmarks_index]
-                lms_error = (warped_lms[:, [1, 0]] - lms_points).T.ravel()
-                warped_view_lms = instance_w[self.model.model_landmarks_index]
-
-                # Jacobian and Hessian wrt shape parameters
-                sd_lms, n_camera_parameters = J_lms(
-                    camera, warped_view_lms, self.shape_pc_lms, camera_update,
-                    focal_length_update)
-                idx = self.n + n_camera_parameters
-                hessian[:idx, :idx] += (landmarks_prior_weight *
-                                        sd_lms.dot(sd_lms.T))
-                sd_error[:idx] = landmarks_prior_weight * sd_lms.dot(lms_error)
+                insert_lms_into_H_JTe(
+                    H, JTe, camera, camera_update, focal_length_update, n_s,
+                    instance_w, instance_in_image, shape_pc_lms, lms_points,
+                    mm.model_landmarks_index, landmarks_prior_weight)
 
             if return_costs:
+                # TODO fix cost calculation
                 texture_parameters = np.linalg.lstsq(texture_pc_uv,
                                                      img_error_uv)[0]
                 costs.append(self.compute_cost(
-                    img_error_uv, lms_error, shape_parameters,
+                    img_error_uv, None, shape_parameters,
                     texture_parameters, shape_prior_weight,
                     texture_prior_weight, landmarks_prior_weight))
 
             # Solve to find the increment of parameters
-            d_shape, d_camera = solve(hessian, sd_error, self.n,
-                                      camera_update, focal_length_update)
+            d_shape, d_camera = solve(H, JTe, n_s, camera_update,
+                                      focal_length_update)
 
             # Update parameters
             shape_parameters += d_shape
             if camera_update:
-                camera_parameters = camera_parameters_update(
-                    camera_parameters, d_camera)
+                camera_parameters = camera_parameters_update(camera_parameters,
+                                                             d_camera)
                 camera = camera.from_vector(camera_parameters)
 
             # Generate the updated instance
-            instance = self.model.instance(shape_weights=shape_parameters,
-                                           texture_weights=texture_parameters)
+            instance = mm.instance(shape_weights=shape_parameters,
+                                   texture_weights=texture_parameters)
 
             # Update lists
             shape_parameters_per_iter.append(shape_parameters.copy())

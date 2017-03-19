@@ -121,10 +121,6 @@ class LucasKanade(object):
         """
         return self.model.n_channels
 
-    def visible_sample_points(self, instance_in_img, image_shape):
-        return visible_sample_points(instance_in_img, image_shape,
-                                     self.n_samples)
-
     def compute_cost(self, data_error, lms_error, shape_parameters,
                      texture_parameters, shape_prior_weight,
                      texture_prior_weight, landmarks_prior_weight):
