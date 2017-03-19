@@ -1,5 +1,7 @@
 import numpy as np
 
+from .jacobian import smoothing_kernel
+
 
 # -------------------------- HESSIAN INITIALIZATION -------------------------- #
 # Functions needed to construct the per-iteration ITW-V video Hessian object.
@@ -16,20 +18,13 @@ def insert_exp_constraint(H, c_exp, n_p, n_q, n_frames):
     H[i_offset:i_offset + size, j_offset:j_offset + size] = exp_const
 
 
-# def insert_smoothness_constraint(H, c_sm, n_p, n_q, n_sites_per_frame,
-#                                  n_frames):
-#     A = np.eye(n_frames - 2)
-#     i, j = np.diag_indices(n_frames - 2)
-#     A[i[:-1], j[:-1] + 1] = -2
-#     A[i[:-2], j[:-2] + 2] = 1
-#     B = sp.csr_matrix(np.eye(n_q) * np.sqrt(c_sm))
-#
-#     smoothing = sp.kron(A, B)
-#     x, y = smoothing.shape
-#
-#     i_offset = n_frames * n_sites_per_frame + n_p + n_frames * n_q
-#     j_offset = n_p
-#     H[i_offset:(i_offset + x), j_offset:(j_offset + y)] = smoothing
+def insert_smoothness_constraint(H, c_sm, n_p, n_q, n_frames):
+    s = smoothing_kernel(n_frames)
+    s_h = s.T.dot(s)
+
+    B = np.eye(n_q) * c_sm
+    smoothing = np.kron(s_h, B)
+    H[n_p:(n_p + n_q * n_frames), n_p:(n_p + n_q * n_frames)] += smoothing
 
 
 # ----------------------- J.T.dot(e) INITIALIZATION  ------------------------- #
@@ -42,35 +37,33 @@ def insert_exp_constraint_to_JTe(JTe, qs, c_exp, n_p, n_q, n_frames):
     JTe[n_p:n_p + size] += -c_exp * qs
 
 
-# def insert_smoothness_constraint_to_JTe(JTe, qs, c_sm, n_p, n_q,
-#                                         n_sites_per_frame, n_frames):
-#     offset = n_frames * n_sites_per_frame + n_p + n_frames * n_q
-#
-#     # form the central difference scheme for qs:
-#     qsr = qs.reshape(n_frames, n_q)
-#     qs_a = qsr[:-2]
-#     qs_b = qsr[1:-1]
-#     qs_c = qsr[2:]
-#
-#     smoothness = (-np.sqrt(c_sm) * (qs_a - 2 * qs_b + qs_c)).ravel()
-#     JTe[offset:offset + smoothness.size] = smoothness
+def insert_smoothness_constraint_to_JTe(JTe, qs, c_sm, n_p, n_q, n_frames):
+    s = smoothing_kernel(n_frames)
+    # Analytically we can observe that the pattern of selection of terms in
+    # JTe for the smoothing is the 2nd order central difference scheme formed
+    # in the Hessian (s.T.dot(s)) - form this matrix here to select the qs as
+    #  we want
+    s_h = s.T.dot(s)
+    # n_frames x n_frames @ n_frames x n_q = n_frames x n_q
+    # ravelling this back preserves per-frame ordering of q in JTe.
+    JTe_smoothing = s_h.dot(qs.reshape(n_frames, n_q)).ravel()
+    JTe[n_p:n_p + n_frames * n_q] += - c_sm * JTe_smoothing
 
 
 # -------------------------- TOTAL INITIALIZATION ---------------------------- #
-def initialize_hessian_and_JTe(c_id, c_exp, c_sm, n_p, n_q, n_c,
-                               p, qs, n_sites_per_frame, n_frames):
+def initialize_hessian_and_JTe(c_id, c_exp, c_sm, n_p, n_q, n_c, p, qs,
+                               n_frames):
     n = n_p + n_frames * n_q + n_frames * n_c
     H = np.zeros((n, n))
     insert_id_constraint(H, c_id, n_p)
     insert_exp_constraint(H, c_exp, n_p, n_q, n_frames)
-    # insert_smoothness_constraint(H, c_sm, n_p, n_q, n_sites_per_frame, n_frames)
+    insert_smoothness_constraint(H, c_sm, n_p, n_q, n_frames)
 
     # The J.T.dot(e) term is always the size of the Hessian w/h (n total params)
     JTe = np.zeros(n)
     insert_id_constraint_to_JTe(JTe, p, c_id, n_p)
     insert_exp_constraint_to_JTe(JTe, qs, c_exp, n_p, n_q, n_frames)
-    # insert_smoothness_constraint_to_JTe(JTe, qs, c_sm, n_p, n_q,
-    #                                     n_sites_per_frame, n_frames)
+    insert_smoothness_constraint_to_JTe(JTe, qs, c_sm, n_p, n_q, n_frames)
     return H, JTe
 
 

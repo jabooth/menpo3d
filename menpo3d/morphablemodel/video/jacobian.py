@@ -19,14 +19,19 @@ def insert_exp_constraint(J, c_exp, n_p, n_q, n_sites_per_frame, n_frames):
     J[i_offset:i_offset + size, j_offset:j_offset + size] = exp_const
 
 
+def smoothing_kernel(n_frames):
+    A = np.eye(n_frames - 2, n_frames)
+    i, j = np.diag_indices(n_frames - 2)
+
+    A[i, j + 1] = -2
+    A[i, j + 2] = 1
+    return A
+
+
 def insert_smoothness_constraint(J, c_sm, n_p, n_q, n_sites_per_frame,
                                  n_frames):
-    A = np.eye(n_frames - 2)
-    i, j = np.diag_indices(n_frames - 2)
-    A[i[:-1], j[:-1] + 1] = -2
-    A[i[:-2], j[:-2] + 2] = 1
-    B = sp.csr_matrix(np.eye(n_q) * np.sqrt(c_sm))
-
+    A = smoothing_kernel(n_frames)
+    B = np.eye(n_q) * np.sqrt(c_sm)
     smoothing = sp.kron(A, B)
     x, y = smoothing.shape
 
@@ -71,14 +76,14 @@ def initialize_jacobian_and_error(c_id, c_exp, c_sm, n_p, n_q, n_c,
     J = sp.lil_matrix((n_jac_m, n_jac_n))
     insert_id_constraint(J, c_id, n_p, n_sites_per_frame, n_frames)
     insert_exp_constraint(J, c_exp, n_p, n_q, n_sites_per_frame, n_frames)
-    # insert_smoothness_constraint(J, c_sm, n_p, n_q, n_sites_per_frame, n_frames)
+    insert_smoothness_constraint(J, c_sm, n_p, n_q, n_sites_per_frame, n_frames)
 
     # The error term is always the size of the Jacobians' n. rows
     e = np.empty(n_jac_m)
     insert_id_constraint_to_e(e, p, c_id, n_sites_per_frame, n_frames)
     insert_exp_constraint_to_e(e, qs, c_exp, n_p, n_sites_per_frame, n_frames)
-    # insert_smoothness_constraint_to_e(e, qs, c_sm, n_p, n_q, n_sites_per_frame,
-    #                                   n_frames)
+    insert_smoothness_constraint_to_e(e, qs, c_sm, n_p, n_q, n_sites_per_frame,
+                                      n_frames)
     return J, e
 
 
