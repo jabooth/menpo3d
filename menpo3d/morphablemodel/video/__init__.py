@@ -1,3 +1,6 @@
+from datetime import timedelta
+from time import time
+
 import numpy as np
 import scipy.sparse as sp
 from menpo.visualize import print_progress, bytes_str
@@ -149,7 +152,41 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
 
     new_p = p + dp
     new_qs = qs + dqs
-    new_dcs = np.array([camera_parameters_update(c, dc)
-                        for c, dc in zip(cs, dcs)])
+    new_cs = np.array([camera_parameters_update(c, dc)
+                       for c, dc in zip(cs, dcs)])
 
-    return locals()
+    return {
+        'p': new_p,
+        'qs': new_qs,
+        'cs': new_cs,
+        'dp': dp,
+        'dqs': dqs,
+        'dcs': dcs,
+    }
+
+
+def fit_video(images, mm, id_indices, exp_indices, template_camera,
+              p, qs, cs, c_id=1, c_l=1, c_exp=1, c_sm=1, lm_group=None,
+              n_samples=1000, n_iters=10):
+    params = [
+        {
+            "p": p,
+            "qs": qs,
+            "cs": cs
+        }]
+
+    for i in range(1, n_iters + 1):
+        print('{} / {}'.format(i, n_iters))
+        # retrieve the last used parameters and pass them into the increment
+        lp = params[-1]
+        t1 = time()
+        incs = increment_parameters(images, mm, id_indices, exp_indices,
+                                    template_camera,
+                                    lp['p'], lp['qs'], lp['cs'],
+                                    c_id=c_id, c_l=c_l, c_exp=c_exp, c_sm=c_sm,
+                                    lm_group=lm_group, n_samples=n_samples)
+        # update the parameter list
+        params.append(incs)
+        print('Iteration {} complete in {}\n'.format(
+            i, timedelta(seconds=(int(time() - t1)))))
+    return params
