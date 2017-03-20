@@ -50,12 +50,11 @@ def J_lms(camera, warped_uv, shape_pc_uv, focal_length_update=False):
     return J, n_camera_parameters
 
 
-def jacobians(shape_parameters, camera_parameters,
-              image, lms_points, mm, id_ind, exp_ind, camera,
+def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
               grad_x, grad_y, shape_pc, shape_pc_lms, n_samples):
 
-    instance = mm.shape_model.instance(shape_parameters)
-    camera = camera.from_vector(camera_parameters)
+    instance = mm.shape_model.instance(s)
+    camera = template_camera.from_vector(c)
 
     (instance_w, instance_in_image, warped_uv, img_error_uv,
      shape_pc_uv, texture_pc_uv, grad_x_uv, grad_y_uv
@@ -69,11 +68,11 @@ def jacobians(shape_parameters, camera_parameters,
     # Landmarks term Jacobian
     # Get projected instance on landmarks and error term
     warped_lms = instance_in_image.points[mm.model_landmarks_index]
-    lms_error = (warped_lms[:, [1, 0]] - lms_points).T.ravel()
+    lms_error_xy = (warped_lms[:, [1, 0]] - lms_points_xy).T.ravel()
     warped_view_lms = instance_w[mm.model_landmarks_index]
     sd_lms, n_camera_parameters = J_lms(camera, warped_view_lms, shape_pc_lms)
 
-    cam_n_params = camera_parameters.shape[0]
+    n_c = c.shape[0]
     # form the main two Jacobians...
     J_f = sd.T
     J_l = sd_lms.T
@@ -81,31 +80,32 @@ def jacobians(shape_parameters, camera_parameters,
     return {
         'J_f_p': J_f[:, id_ind],
         'J_f_q': J_f[:, exp_ind],
-        'J_f_c': J_f[:, -cam_n_params:],
+        'J_f_c': J_f[:, -n_c:],
 
         'J_l_p': J_l[:, id_ind],
         'J_l_q': J_l[:, exp_ind],
-        'J_l_c': J_l[:, -cam_n_params:],
+        'J_l_c': J_l[:, -n_c:],
 
         'e_f': img_error_uv,
-        'e_l': lms_error
+        'e_l': lms_error_xy
     }
 
 
-def fit_video(images, cameras, mm, id_indices, exp_indices, p, qs,
-              c_id=1., c_l=1., c_exp=1., c_sm=1., n_samples=1000):
+def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
+                         p, qs, cs, c_id=1, c_l=1, c_exp=1, c_sm=1,
+                         lm_group=None, n_samples=1000):
 
     n_frames = len(images)
-    n_lms = images[0].landmarks[None].n_points
+    n_lms = images[0].landmarks[lm_group].n_points
     n_channels = images[0].n_channels
-    n_p = len(id_indices)
-    n_q = len(exp_indices)
-    n_c = cameras[0].n_parameters
 
     n_elements_per_frame = n_channels * n_samples
     n_sites_per_frame = n_elements_per_frame + (2 * n_lms)
-
     n_points = mm.shape_model.template_instance.n_points
+
+    n_p = len(id_indices)
+    n_q = len(exp_indices)
+    n_c = cs.shape[1]
 
     print('Precomputing....')
     # Rescale shape components to have size:
@@ -118,24 +118,23 @@ def fit_video(images, cameras, mm, id_indices, exp_indices, p, qs,
                                         n_frames)
     print('H: {} ({})'.format(H.shape, bytes_str(H.nbytes)))
 
-    for (f, image), camera, q in zip(enumerate(print_progress(images)),
-                                     cameras, qs):
-        camera_params = camera.as_vector()
+    for (f, image), c, q in zip(enumerate(print_progress(
+            images, prefix='Incrementing H/JTe')), cs, qs):
 
-        shape_params = np.zeros(mm.shape_model.n_active_components)
-        shape_params[id_indices] = p
-        shape_params[exp_indices] = q
+        # Form the overall shape parameter: [p, q]
+        s = np.zeros(mm.shape_model.n_active_components)
+        s[id_indices] = p
+        s[exp_indices] = q
 
-        # TODO fix this two wrongs make a right
-        lms_points = image.landmarks[None].points[:, [1, 0]]
+        # In our error we consider landmarks stored [x, y] - so flip here.
+        lms_points_xy = image.landmarks[lm_group].points[:, [1, 0]]
 
         # Compute input image gradient
         grad_x, grad_y = gradient_xy(image)
 
-        j = jacobians(shape_params, camera_params, image, lms_points,
-                      mm, id_indices, exp_indices, camera,
-                      grad_x, grad_y,
-                      shape_pc, shape_pc_lms, n_samples)
+        j = jacobians(s, c, image, lms_points_xy, mm, id_indices, exp_indices,
+                      template_camera, grad_x, grad_y, shape_pc, shape_pc_lms,
+                      n_samples)
         insert_frame_to_H(H, j, f, n_p, n_q, n_c, c_l, n_frames)
         insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_l, n_frames)
     print('Converting Hessian to sparse format')
@@ -143,5 +142,14 @@ def fit_video(images, cameras, mm, id_indices, exp_indices, p, qs,
     print("Sparsity (prop. 0's) of H: {:.2%}".format(
         1 - (H.count_nonzero() / np.prod(np.array(H.shape)))))
     print('Solving for parameter update')
-    dp = sp.linalg.spsolve(H, JTe)
-    return locals(), dp
+    d = sp.linalg.spsolve(H, JTe)
+    dp = d[:n_p]
+    dqs = d[n_p:(n_p + (n_frames * n_q))].reshape([n_frames, n_q])
+    dcs = d[-(n_frames * n_c):].reshape([n_frames, n_c])
+
+    new_p = p + dp
+    new_qs = qs + dqs
+    new_dcs = np.array([camera_parameters_update(c, dc)
+                        for c, dc in zip(cs, dcs)])
+
+    return locals()
