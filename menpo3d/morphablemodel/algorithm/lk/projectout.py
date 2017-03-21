@@ -9,7 +9,7 @@ from .base import (camera_parameters_update, gradient_xy, J_lms, LucasKanade,
                    sample_at_bc_vi, visible_sample_points)
 
 
-def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
+def J_data(camera, warped_uv, shape_pc_uv, U_tex_uv, grad_x_uv,
            grad_y_uv, camera_update, focal_length_update):
     # Compute derivative of camera wrt shape and camera parameters
     # 2 x n_s x n_samples
@@ -33,15 +33,15 @@ def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
     n_s = J.shape[1]
     # n_s x (n_channels x n_samples)
     J = np.transpose(J, (1, 0, 2)).reshape(n_s, -1)
-    PJ = project_out(J, texture_pc_uv)
+    PJ = project_out(J, U_tex_uv)
 
     # Concatenate to create the data term steepest descent
     return PJ, n_camera_parameters
 
 
-def project_out(J, U):
-    tmp = J.dot(U)
-    return J - tmp.dot(U.T)
+def project_out(J, U, fast_approx=True):
+    tmp = J.dot(U.T if fast_approx else np.linalg.pinv(U))
+    return J - tmp.dot(U)
 
 
 def solve(H, JTe, n, camera_update, focal_length_update):
@@ -89,10 +89,10 @@ def sample_uv_terms(instance, image, camera, mm, shape_pc, grad_x, grad_y,
     warped_uv = sample_at_bc_vi(instance_w, bcoords, vert_indices)
 
     # n_samples x n_channels x n_texture_comps
-    texture_pc_uv = mm.sample_texture_model(bcoords, tri_indices)
+    U_tex_uv = mm.sample_texture_model(bcoords, tri_indices)
 
-    # (n_samples * n_channels) x n_texture_comps
-    texture_pc_uv = texture_pc_uv.reshape((-1, texture_pc_uv.shape[-1]))
+    # n_texture_comps x (n_samples * n_channels)
+    U_tex_uv = U_tex_uv.reshape((-1, U_tex_uv.shape[-1])).T
 
     # n_channels x n_samples
     m_texture_uv = mm.instance().sample_texture_with_barycentric_coordinates(
@@ -113,7 +113,7 @@ def sample_uv_terms(instance, image, camera, mm, shape_pc, grad_x, grad_y,
     img_error_uv = (m_texture_uv - img_uv).ravel()
 
     return (instance_w, instance_in_image, warped_uv, img_error_uv,
-            shape_pc_uv, texture_pc_uv, grad_x_uv, grad_y_uv)
+            shape_pc_uv, U_tex_uv, grad_x_uv, grad_y_uv)
 
 
 def build_H_and_JTe(camera, camera_update, focal_length_update, n_s,
@@ -201,8 +201,8 @@ class ProjectOutForwardAdditive(LucasKanade):
     def run(self, image, initial_mesh, camera, landmarks=None,
             camera_update=False, focal_length_update=False,
             reconstruction_weight=1., shape_prior_weight=1.,
-            texture_prior_weight=1.,  landmarks_prior_weight=1.,
-            gt_mesh=None, max_iters=20, return_costs=False, verbose=True):
+            landmarks_prior_weight=1., gt_mesh=None, max_iters=20,
+            return_costs=False, verbose=True, **_):
 
         n_s = self.n
         mm = self.model
@@ -211,12 +211,11 @@ class ProjectOutForwardAdditive(LucasKanade):
         shape_pc_lms = self.shape_pc_lms
 
         # Parse landmarks prior options
-        if landmarks is None or landmarks_prior_weight is None:
-            landmarks_prior_weight = None
-            landmarks = None
-        lms_points = None
         if landmarks is not None:
-            lms_points = landmarks.points[:, [1, 0]]
+            lms_points_xy = landmarks.points[:, [1, 0]]
+        else:
+            landmarks_prior_weight = None
+            lms_points_xy = None
 
         # Retrieve camera parameters from the provided camera object.
         # Project provided instance to retrieve shape and texture parameters.
@@ -252,7 +251,7 @@ class ProjectOutForwardAdditive(LucasKanade):
 
             # Sample all the terms at the UV sample locations
             (instance_w, instance_in_image, warped_uv, img_error_uv,
-             shape_pc_uv, texture_pc_uv, grad_x_uv, grad_y_uv
+             shape_pc_uv, U_tex_uv, grad_x_uv, grad_y_uv
              ) = sample_uv_terms(instance, image, camera, mm,
                                  shape_pc, grad_x, grad_y, n_samples)
 
@@ -260,7 +259,7 @@ class ProjectOutForwardAdditive(LucasKanade):
             H, JTe = build_H_and_JTe(
                 camera, camera_update, focal_length_update, n_s,
                 reconstruction_weight, warped_uv, img_error_uv, shape_pc_uv,
-                texture_pc_uv, grad_x_uv, grad_y_uv)
+                U_tex_uv, grad_x_uv, grad_y_uv)
 
             # Compute JT and update H/JTe wrt shape prior
             if shape_prior_weight is not None:
@@ -272,13 +271,13 @@ class ProjectOutForwardAdditive(LucasKanade):
             if landmarks_prior_weight is not None:
                 lms_error = insert_lms_into_H_JTe(
                     H, JTe, camera, camera_update, focal_length_update, n_s,
-                    instance_w, instance_in_image, shape_pc_lms, lms_points,
+                    instance_w, instance_in_image, shape_pc_lms, lms_points_xy,
                     mm.model_landmarks_index, landmarks_prior_weight)
             else:
                 lms_error = 0
 
             if return_costs:
-                cost = compute_cost(project_out(img_error_uv, texture_pc_uv),
+                cost = compute_cost(project_out(img_error_uv, U_tex_uv),
                                     lms_error, shape_parameters,
                                     shape_prior_weight,
                                     self.J_shape_prior,
