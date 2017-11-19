@@ -39,7 +39,8 @@ def orthogonalize_sfm(M_hat, S_hat):
     G = U * np.sqrt(s)
 
     num = M_hat_r.dot(G).reshape([-1, 3])
-    den = np.linalg.pinv(num.T)
+    den = np.vstack([np.linalg.pinv(x.T) for x in num.reshape([-1, 2, 3])])
+
     Q = G.dot(sqrtm(np.linalg.lstsq(num, den)[0]))
 
     M = M_hat.dot(Q)
@@ -53,14 +54,34 @@ def transforms_for_sfm_result(M, T):
          [0, 0, 0, 1]])) for m, t in zip(M, T)]
 
 
-def structure_from_motion(pointclouds_2d):
+def decompose_sfm_m_to_rot_scale(m):
+    R1, s, R2 = np.linalg.svd(m, full_matrices=False)
+
+    scale = s.mean()
+    Rab = R1.dot(R2)
+    Rc = np.cross(Rab[0], Rab[1])
+    R = np.vstack([Rab, Rc[None]])
+    return R, scale
+
+
+def enforce_uniform_scale_constraint(M, L_hat):
+    R_and_scale = [decompose_sfm_m_to_rot_scale(m) for m in M]
+    P = np.array([(R * s)[:2] for R, s in R_and_scale]).reshape([-1, 3])
+    S = np.linalg.lstsq(P, L_hat)[0].T
+    return P, S
+
+
+def structure_from_motion(pointclouds_2d, uniform_scale_constraint=True):
     # n_frames, 2, n_lms
-    lms = np.concatenate([l.points.T[None] for l in pointclouds_2d], axis=0)
-    T = lms.mean(axis=-1)
-    lms_centred = lms - T[..., None]
+    # For SfM we always consider landmarks [x, y], which goes against Menpo's
+    # conventions...
+    W = np.concatenate([l.points[:, ::-1].T[None] for l in pointclouds_2d],
+                       axis=0)
+    T = W.mean(axis=-1)
+    W_centred = W - T[..., None]
 
     # n_frames, 2 x n_lms
-    L_hat = lms_centred.reshape([len(pointclouds_2d) * 2, -1])
+    L_hat = W_centred.reshape([len(pointclouds_2d) * 2, -1])
 
     # sum of largest independent x/y displacement across sequence
     scale = np.abs(L_hat).max(axis=-1).reshape([-1, 2]).max(axis=0).sum()
@@ -76,12 +97,21 @@ def structure_from_motion(pointclouds_2d):
     M_hat = U[:, :3] * s_sqrt  # Rotation matrix and configuration weights
     S_hat = s_sqrt * V[:, :3]  # recovered 3D shape
 
-    M, s = orthogonalize_sfm(M_hat, S_hat)
+    M_i, S = orthogonalize_sfm(M_hat, S_hat)
+
+    if uniform_scale_constraint:
+        print('Enforcing uniform scale')
+        M_i, S = enforce_uniform_scale_constraint(M_i.reshape([-1, 2, 3]),
+                                                  L_hat)
 
     # reform M into meaningful arrays
-    M = M.reshape([-1, 2, 3]) * scale
+    M = M_i.reshape([-1, 2, 3])
+
     pointcloud_3d = pointclouds_2d[0].copy()
     pointcloud_3d._landmarks = None
-    pointcloud_3d.points = np.ascontiguousarray(s)
-    return pointcloud_3d, M, T
+    pointcloud_3d.points = np.ascontiguousarray(S)
+    # TODO
+    # We should have a formalized Orthographic Camera - it should flip ouput
+    # so that [X, Y, (Z)] maps to [Y', X`] in the image.
+    return pointcloud_3d, M, T, scale
     # return pointcloud_3d, transforms_for_sfm_result(M, T)

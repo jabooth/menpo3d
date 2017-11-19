@@ -121,54 +121,5 @@ class LucasKanade(object):
         """
         return self.model.n_channels
 
-    def compute_cost(self, data_error, lms_error, shape_parameters,
-                     texture_parameters, shape_prior_weight,
-                     texture_prior_weight, landmarks_prior_weight):
-
-        # Cost of data term
-        data_cost = data_error.T.dot(data_error)
-        # Cost of shape prior
-        if shape_prior_weight is not None:
-            # print('shape_prior: {}'.format(shape_prior_weight))
-            shape_cost = (shape_prior_weight *
-                          np.sum((shape_parameters ** 2) * self.J_shape_prior))
-        else:
-            # print('Warning - no shape prior weight')
-            shape_cost = 0
-
-        # Cost of texture prior
-        if texture_prior_weight is not None:
-            # print('texture_prior: {}'.format(texture_prior_weight))
-            # print('texture_parameters: {}'.format(texture_parameters))
-            # print('J_texture_prior: {}'.format(self.J_texture_prior))
-            texture_cost = (texture_prior_weight *
-                            np.sum((texture_parameters ** 2) *
-                                   self.J_texture_prior))
-        else:
-            # print('Warning - no texture prior weight')
-            texture_cost = 0
-
-        # Cost of landmarks prior
-        if landmarks_prior_weight is not None:
-            # print('landmarks_prior: {}'.format(landmarks_prior_weight))
-            landmarks_cost = landmarks_prior_weight * lms_error.T.dot(lms_error)
-        else:
-            # print('Warning - no landmarks prior weight')
-            landmarks_cost = 0
-
-        total_cost = data_cost + shape_cost + texture_cost + landmarks_cost
-
-        # print('COST: {}\n    Data: {}\n    Shape:scost, landmarks_cost))
-        return total_cost
-
     def _precompute(self):
-        # Rescale shape and appearance components to have size:
-        # n_vertices x (n_active_components * n_dims)
-        shape_pc = self.model.shape_model.components.T
-        self.shape_pc = shape_pc.reshape([self.n_vertices, -1])
-
-        # Priors
-        self.J_shape_prior = 1. / np.array(self.model.shape_model.eigenvalues)
-        self.J_texture_prior = 1. / np.array(self.model.texture_model.eigenvalues)
-        self.shape_pc_lms = shape_pc.reshape([self.n_vertices, 3, -1])[
-            self.model.model_landmarks_index]
+        print('Override this in subclasses')

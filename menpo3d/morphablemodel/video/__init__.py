@@ -1,3 +1,6 @@
+from datetime import timedelta
+from time import time
+
 import numpy as np
 import scipy.sparse as sp
 from menpo.visualize import print_progress, bytes_str
@@ -11,7 +14,7 @@ from .hessian import (initialize_hessian_and_JTe, insert_frame_to_H,
                       insert_frame_to_JTe)
 
 
-def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
+def J_data(camera, warped_uv, shape_pc_uv, U_tex_pc, grad_x_uv,
            grad_y_uv, focal_length_update=False):
     # Compute derivative of camera wrt shape and camera parameters
     dp_da_dr = d_camera_d_shape_parameters(camera, warped_uv, shape_pc_uv)
@@ -21,7 +24,6 @@ def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
 
     # stack the shape_parameters/camera_parameters updates
     dp_da_dr = np.hstack((dp_da_dr, dp_dr))
-    n_camera_parameters = dp_dr.shape[1]
 
     # Multiply image gradient with camera derivative
     permuted_grad_x = np.transpose(grad_x_uv[..., None], (0, 2, 1))
@@ -31,9 +33,7 @@ def J_data(camera, warped_uv, shape_pc_uv, texture_pc_uv, grad_x_uv,
     # Project-out
     n_params = J.shape[1]
     J = np.transpose(J, (1, 0, 2)).reshape(n_params, -1)
-    PJ = project_out(J, texture_pc_uv)
-
-    return PJ, n_camera_parameters
+    return project_out(J, U_tex_pc)
 
 
 def J_lms(camera, warped_uv, shape_pc_uv, focal_length_update=False):
@@ -42,12 +42,11 @@ def J_lms(camera, warped_uv, shape_pc_uv, focal_length_update=False):
     dp_dr = d_camera_d_camera_parameters(
         camera, warped_uv, with_focal_length=focal_length_update)
     J = np.hstack((J, dp_dr))
-    n_camera_parameters = dp_dr.shape[1]
 
     # Reshape to : n_params x (2 * N)
     n_params = J.shape[1]
     J = np.transpose(J, (1, 0, 2)).reshape(n_params, -1)
-    return J, n_camera_parameters
+    return J
 
 
 def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
@@ -57,26 +56,26 @@ def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
     camera = template_camera.from_vector(c)
 
     (instance_w, instance_in_image, warped_uv, img_error_uv,
-     shape_pc_uv, texture_pc_uv, grad_x_uv, grad_y_uv
-     ) = sample_uv_terms(instance, image, camera, mm, shape_pc,
-                         grad_x, grad_y, n_samples)
+     shape_pc_uv, U_tex_pc, grad_x_uv, grad_y_uv
+     ) = sample_uv_terms(instance, image, camera, mm, shape_pc, grad_x, grad_y,
+                         n_samples)
 
     # Data term Jacobian
-    sd, n_camera_parameters = J_data(camera, warped_uv, shape_pc_uv,
-                                     texture_pc_uv, grad_x_uv, grad_y_uv)
+    JT = J_data(camera, warped_uv, shape_pc_uv, U_tex_pc, grad_x_uv, grad_y_uv)
 
     # Landmarks term Jacobian
     # Get projected instance on landmarks and error term
     warped_lms = instance_in_image.points[mm.model_landmarks_index]
     lms_error_xy = (warped_lms[:, [1, 0]] - lms_points_xy).T.ravel()
     warped_view_lms = instance_w[mm.model_landmarks_index]
-    sd_lms, n_camera_parameters = J_lms(camera, warped_view_lms, shape_pc_lms)
+    J_lT = J_lms(camera, warped_view_lms, shape_pc_lms)
 
-    n_c = c.shape[0]
     # form the main two Jacobians...
-    J_f = sd.T
-    J_l = sd_lms.T
-    # and then slice at the appropriate indices to break down by param type.
+    J_f = JT.T
+    J_l = J_lT.T
+
+    # ...and then slice at the appropriate indices to break down by param type.
+    n_c = c.shape[0]
     return {
         'J_f_p': J_f[:, id_ind],
         'J_f_q': J_f[:, exp_ind],
@@ -96,11 +95,6 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
                          lm_group=None, n_samples=1000):
 
     n_frames = len(images)
-    n_lms = images[0].landmarks[lm_group].n_points
-    n_channels = images[0].n_channels
-
-    n_elements_per_frame = n_channels * n_samples
-    n_sites_per_frame = n_elements_per_frame + (2 * n_lms)
     n_points = mm.shape_model.template_instance.n_points
 
     n_p = len(id_indices)
@@ -149,7 +143,41 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
 
     new_p = p + dp
     new_qs = qs + dqs
-    new_dcs = np.array([camera_parameters_update(c, dc)
-                        for c, dc in zip(cs, dcs)])
+    new_cs = np.array([camera_parameters_update(c, dc)
+                       for c, dc in zip(cs, dcs)])
 
-    return locals()
+    return {
+        'p': new_p,
+        'qs': new_qs,
+        'cs': new_cs,
+        'dp': dp,
+        'dqs': dqs,
+        'dcs': dcs,
+    }
+
+
+def fit_video(images, mm, id_indices, exp_indices, template_camera,
+              p, qs, cs, c_id=1, c_l=1, c_exp=1, c_sm=1, lm_group=None,
+              n_samples=1000, n_iters=10):
+    params = [
+        {
+            "p": p,
+            "qs": qs,
+            "cs": cs
+        }]
+
+    for i in range(1, n_iters + 1):
+        print('{} / {}'.format(i, n_iters))
+        # retrieve the last used parameters and pass them into the increment
+        l = params[-1]
+        t1 = time()
+        incs = increment_parameters(images, mm, id_indices, exp_indices,
+                                    template_camera, l['p'], l['qs'], l['cs'],
+                                    c_id=c_id, c_l=c_l, c_exp=c_exp, c_sm=c_sm,
+                                    lm_group=lm_group, n_samples=n_samples)
+        # update the parameter list
+        params.append(incs)
+        # And report the time taken for the iteration.
+        dt = int(time() - t1)
+        print('Iteration {} complete in {}\n'.format(i, timedelta(seconds=dt)))
+    return params
