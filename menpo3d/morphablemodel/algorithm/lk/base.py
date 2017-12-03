@@ -11,6 +11,10 @@ from ..derivatives import (d_camera_d_camera_parameters,
 def camera_parameters_update(c, dc):
     # Add for focal length and translation parameters, but multiply for
     # quaternions
+    # supress focal length optimisation
+    dc[0] = 0
+    # Always lock the first quaternion value to 1
+    dc[1] = 1
     new = c + dc
     new[1:5] = quaternion_multiply(c[1:5], dc[1:5])
     return new

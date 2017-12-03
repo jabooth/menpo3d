@@ -6,7 +6,8 @@ from .jacobian import smoothing_kernel
 # -------------------------- HESSIAN INITIALIZATION -------------------------- #
 # Functions needed to construct the per-iteration ITW-V video Hessian object.
 def insert_id_constraint(H, c_id, n_p):
-    H[:n_p, :n_p] += np.eye(n_p) * c_id
+    H_id = H[:n_p, :n_p]
+    np.fill_diagonal(H_id, np.diag(H_id) + c_id)
 
 
 def insert_exp_constraint(H, c_exp, n_p, n_q, n_frames):
@@ -14,7 +15,7 @@ def insert_exp_constraint(H, c_exp, n_p, n_q, n_frames):
     j_offset = n_p
 
     size = n_q * n_frames
-    exp_const = np.eye(size) * c_exp
+    exp_const = np.diag(np.repeat(c_exp, n_frames))
     H[i_offset:i_offset + size, j_offset:j_offset + size] = exp_const
 
 

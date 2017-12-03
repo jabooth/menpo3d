@@ -75,15 +75,15 @@ def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
     J_l = J_lT.T
 
     # ...and then slice at the appropriate indices to break down by param type.
-    n_c = c.shape[0]
+    c_offset = id_ind.shape[0] + exp_ind.shape[0]
     return {
         'J_f_p': J_f[:, id_ind],
         'J_f_q': J_f[:, exp_ind],
-        'J_f_c': J_f[:, -n_c:],
+        'J_f_c': J_f[:, c_offset:],
 
         'J_l_p': J_l[:, id_ind],
         'J_l_q': J_l[:, exp_ind],
-        'J_l_c': J_l[:, -n_c:],
+        'J_l_c': J_l[:, c_offset:],
 
         'e_f': img_error_uv,
         'e_l': lms_error_xy
@@ -97,9 +97,14 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
     n_frames = len(images)
     n_points = mm.shape_model.template_instance.n_points
 
+    # weight the provided constants by the std.dev of the relevant component
+    shape_var = 1 / mm.shape_model.eigenvalues
+    c_id_w = c_id * shape_var[id_indices]
+    c_exp_w = c_exp * shape_var[exp_indices]
+    # we now only pass through the weighted (_w) variants.
     n_p = len(id_indices)
     n_q = len(exp_indices)
-    n_c = cs.shape[1]
+    n_c = cs.shape[1] - 2  # sub one for quaternion, one for focal length
 
     print('Precomputing....')
     # Rescale shape components to have size:
@@ -108,7 +113,7 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
     shape_pc_lms = shape_pc.reshape([n_points, 3, -1])[mm.model_landmarks_index]
 
     print('Initializing Hessian/JTe for frame...')
-    H, JTe = initialize_hessian_and_JTe(c_id, c_exp, c_sm, n_p, n_q, n_c, p, qs,
+    H, JTe = initialize_hessian_and_JTe(c_id_w, c_exp_w, c_sm, n_p, n_q, n_c, p, qs,
                                         n_frames)
     print('H: {} ({})'.format(H.shape, bytes_str(H.nbytes)))
 
@@ -140,6 +145,9 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
     dp = d[:n_p]
     dqs = d[n_p:(n_p + (n_frames * n_q))].reshape([n_frames, n_q])
     dcs = d[-(n_frames * n_c):].reshape([n_frames, n_c])
+    # Add the focal length and degenerate quaternion parameters back on as
+    # null delta updates
+    dcs = np.hstack([np.array([[0, 1]]), dcs])
 
     new_p = p + dp
     new_qs = qs + dqs
