@@ -124,3 +124,19 @@ def insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_l, n_frames):
 
     offset_c = n_p + n_frames * n_q + f * n_c
     JTe[offset_c:offset_c + n_c] += JTe_c
+
+
+
+def insert_frame_to_JTe_old(JTe, j, f, n_p, n_q, n_c, c_l, n_frames):
+
+    JTe_p = c_l * j['J_l_p'].T @ j['e_l']
+    JTe_q = c_l * j['J_l_q'].T @ j['e_l']
+    JTe_c = c_l * j['J_l_c'].T @ j['e_l']
+
+    JTe[:n_p] = JTe_p
+
+    offset_q = n_p + f * n_q
+    JTe[offset_q:offset_q + n_q] = JTe_q
+
+    offset_c = n_p + n_frames * n_q + f * n_c
+    JTe[offset_c:offset_c + n_c] = JTe_c

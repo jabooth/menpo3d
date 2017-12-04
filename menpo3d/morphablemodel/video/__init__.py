@@ -11,7 +11,7 @@ from ..algorithm.lk import camera_parameters_update
 from ..algorithm.lk.base import gradient_xy
 from ..algorithm.lk.projectout import project_out, sample_uv_terms
 from .hessian import (initialize_hessian_and_JTe, insert_frame_to_H,
-                      insert_frame_to_JTe)
+                      insert_frame_to_JTe, insert_frame_to_JTe_old)
 
 
 def J_data(camera, warped_uv, shape_pc_uv, U_tex_pc, grad_x_uv,
@@ -66,7 +66,9 @@ def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
     # Landmarks term Jacobian
     # Get projected instance on landmarks and error term
     warped_lms = instance_in_image.points[mm.model_landmarks_index]
-    lms_error_xy = (warped_lms[:, [1, 0]] - lms_points_xy).T.ravel()
+    # TODO check the ordering here.
+    # Reverted to match image case, check.
+    lms_error_xy = (lms_points_xy - warped_lms[:, [1, 0]]).T.ravel()
     warped_view_lms = instance_w[mm.model_landmarks_index]
     J_lT = J_lms(camera, warped_view_lms, shape_pc_lms)
 
@@ -92,7 +94,7 @@ def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
 
 def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
                          p, qs, cs, c_id=1, c_l=1, c_exp=1, c_sm=1,
-                         lm_group=None, n_samples=1000):
+                         lm_group=None, n_samples=1000, quirks_mode=False):
 
     n_frames = len(images)
     n_points = mm.shape_model.template_instance.n_points
@@ -135,7 +137,10 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
                       template_camera, grad_x, grad_y, shape_pc, shape_pc_lms,
                       n_samples)
         insert_frame_to_H(H, j, f, n_p, n_q, n_c, c_l, n_frames)
-        insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_l, n_frames)
+        if quirks_mode:
+            insert_frame_to_JTe_old(JTe, j, f, n_p, n_q, n_c, c_l, n_frames)
+        else:
+            insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_l, n_frames)
     print('Converting Hessian to sparse format')
     H = sp.csr_matrix(H)
     print("Sparsity (prop. 0's) of H: {:.2%}".format(
@@ -166,7 +171,7 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
 
 def fit_video(images, mm, id_indices, exp_indices, template_camera,
               p, qs, cs, c_id=1, c_l=1, c_exp=1, c_sm=1, lm_group=None,
-              n_samples=1000, n_iters=10):
+              n_samples=1000, n_iters=10, quirks_mode=False):
     params = [
         {
             "p": p,
@@ -182,10 +187,43 @@ def fit_video(images, mm, id_indices, exp_indices, template_camera,
         incs = increment_parameters(images, mm, id_indices, exp_indices,
                                     template_camera, l['p'], l['qs'], l['cs'],
                                     c_id=c_id, c_l=c_l, c_exp=c_exp, c_sm=c_sm,
-                                    lm_group=lm_group, n_samples=n_samples)
+                                    lm_group=lm_group, n_samples=n_samples,
+                                    quirks_mode=quirks_mode)
         # update the parameter list
         params.append(incs)
         # And report the time taken for the iteration.
         dt = int(time() - t1)
         print('Iteration {} complete in {}\n'.format(i, timedelta(seconds=dt)))
     return params
+
+
+def instance_for_params(mm, id_ind, exp_ind, template_camera, p, q,
+                        c):
+    shape_params = np.zeros(mm.shape_model.n_active_components)
+    shape_params[id_ind] = p
+    shape_params[exp_ind] = q
+    instance = mm.shape_model.instance(shape_params)
+    camera = template_camera.from_vector(c)
+    instance_in_img = camera.apply(instance)
+    return {
+        'instance': instance,
+        'instance_in_img': instance_in_img,
+        'camera': camera
+    }
+
+
+def render_iteration(mm, id_ind, exp_ind, img_shape, camera, params,
+                     img_index, iteration):
+    from lsfm.visualize import lambertian_shading
+    from menpo3d.rasterize import rasterize_mesh
+    params_i = params[iteration]
+    c_i = params_i['cs'][img_index]
+    p_i = params_i['p']
+    q_i = params_i['qs'][img_index]
+    instance_i = instance_for_params(mm, id_ind, exp_ind, camera,
+                                     p_i, q_i, c_i)
+
+    mesh_in_img_lit = lambertian_shading(
+        instance_i['instance_in_img'].as_colouredtrimesh())
+
+    return rasterize_mesh(mesh_in_img_lit, img_shape).as_unmasked()
