@@ -152,7 +152,7 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
     dcs = d[-(n_frames * n_c):].reshape([n_frames, n_c])
     # Add the focal length and degenerate quaternion parameters back on as
     # null delta updates
-    dcs = np.hstack([np.array([[0, 1]]), dcs])
+    dcs = np.hstack([np.tile(np.array([0, 1]), (n_frames, 1)), dcs])
 
     new_p = p + dp
     new_qs = qs + dqs

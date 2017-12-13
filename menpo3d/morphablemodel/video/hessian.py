@@ -35,7 +35,7 @@ def insert_id_constraint_to_JTe(JTe, p, c_id, n_p):
 
 def insert_exp_constraint_to_JTe(JTe, qs, c_exp, n_p, n_q, n_frames):
     size = n_q * n_frames
-    JTe[n_p:n_p + size] += -c_exp * qs.ravel()
+    JTe[n_p:n_p + size] += - np.tile(c_exp, n_frames)  * qs.ravel()
 
 
 def insert_smoothness_constraint_to_JTe(JTe, qs, c_sm, n_p, n_q, n_frames):
