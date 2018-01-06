@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import timedelta
 from time import time
 
@@ -50,7 +51,8 @@ def J_lms(camera, warped_uv, shape_pc_uv, focal_length_update=False):
 
 
 def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
-              grad_x, grad_y, shape_pc, shape_pc_lms, n_samples):
+              grad_x, grad_y, shape_pc, shape_pc_lms, n_samples,
+              compute_costs=False):
 
     instance = mm.shape_model.instance(s)
     camera = template_camera.from_vector(c)
@@ -78,7 +80,7 @@ def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
 
     # ...and then slice at the appropriate indices to break down by param type.
     c_offset = id_ind.shape[0] + exp_ind.shape[0]
-    return {
+    jacs = {
         'J_f_p': J_f[:, id_ind],
         'J_f_q': J_f[:, exp_ind],
         'J_f_c': J_f[:, c_offset:],
@@ -91,10 +93,25 @@ def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
         'e_l': lms_error_xy
     }
 
+    if compute_costs:
+        resid_f = project_out(img_error_uv, U_tex_pc)
+        err_f = (resid_f ** 2).sum()
+
+        resid_l = lms_error_xy
+        err_l = (resid_l ** 2).sum()
+
+        jacs['costs'] = {
+            'err_f': err_f,
+            'err_l': err_l
+        }
+
+    return jacs
+
 
 def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
                          p, qs, cs, c_id=1, c_l=1, c_exp=1, c_sm=1,
-                         lm_group=None, n_samples=1000, quirks_mode=False):
+                         lm_group=None, n_samples=1000, quirks_mode=False,
+                         compute_costs=False):
 
     n_frames = len(images)
     n_points = mm.shape_model.template_instance.n_points
@@ -119,6 +136,9 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
                                         n_frames)
     print('H: {} ({})'.format(H.shape, bytes_str(H.nbytes)))
 
+    if compute_costs:
+        costs = defaultdict(list)
+
     for (f, image), c, q in zip(enumerate(print_progress(
             images, prefix='Incrementing H/JTe')), cs, qs):
 
@@ -135,12 +155,17 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
 
         j = jacobians(s, c, image, lms_points_xy, mm, id_indices, exp_indices,
                       template_camera, grad_x, grad_y, shape_pc, shape_pc_lms,
-                      n_samples)
+                      n_samples, compute_costs=compute_costs)
         insert_frame_to_H(H, j, f, n_p, n_q, n_c, c_l, n_frames)
         if quirks_mode:
             insert_frame_to_JTe_old(JTe, j, f, n_p, n_q, n_c, c_l, n_frames)
         else:
             insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_l, n_frames)
+
+        if compute_costs:
+            for cost, val in j['costs'].items():
+                costs[cost].append(val)
+
     print('Converting Hessian to sparse format')
     H = sp.csr_matrix(H)
     print("Sparsity (prop. 0's) of H: {:.2%}".format(
@@ -159,7 +184,7 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
     new_cs = np.array([camera_parameters_update(c, dc)
                        for c, dc in zip(cs, dcs)])
 
-    return {
+    params = {
         'p': new_p,
         'qs': new_qs,
         'cs': new_cs,
@@ -168,10 +193,41 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
         'dcs': dcs,
     }
 
+    if compute_costs:
+        c = {k: np.array(v) for k, v in costs.items()}
+
+        err_s_id = ((p ** 2) * shape_var[id_indices]).sum()
+        err_s_exp = ((qs ** 2) * shape_var[exp_indices]).sum()
+        err_sm = ((qs[:-2] - 2 * qs[1:-1] + qs[2:]) ** 2).sum()
+        # TODO confirm this weight isn't required here
+        # err_sm = (((qs[:-2] - 2 * qs[1:-1] + qs[2:]) ** 2) * shape_var[exp_indices]).sum()
+
+        err_f_tot = c['err_f'].sum()
+        err_l_tot = c['err_l'].sum()
+
+        total_energy = (err_f_tot +
+                        c_l * err_l_tot +
+                        c_id * err_s_id +
+                        c_exp * err_s_exp +
+                        c_sm * err_sm)
+
+        c['total_energy'] = total_energy
+        c['err_s_id'] = (c_id, err_s_id)
+        c['err_s_exp'] = (c_exp, err_s_exp)
+        c['err_sm'] = (c_sm, err_sm)
+        c['err_f_tot'] = err_f_tot
+        c['err_l_tot'] = (c_l, err_l_tot)
+
+        print_cost_dict(c)
+
+        params['costs'] = c
+    return params
+
 
 def fit_video(images, mm, id_indices, exp_indices, template_camera,
               p, qs, cs, c_id=1, c_l=1, c_exp=1, c_sm=1, lm_group=None,
-              n_samples=1000, n_iters=10, quirks_mode=False):
+              n_samples=1000, n_iters=10, compute_costs=False,
+              quirks_mode=False):
     params = [
         {
             "p": p,
@@ -188,7 +244,8 @@ def fit_video(images, mm, id_indices, exp_indices, template_camera,
                                     template_camera, l['p'], l['qs'], l['cs'],
                                     c_id=c_id, c_l=c_l, c_exp=c_exp, c_sm=c_sm,
                                     lm_group=lm_group, n_samples=n_samples,
-                                    quirks_mode=quirks_mode)
+                                    quirks_mode=quirks_mode,
+                                    compute_costs=compute_costs)
         # update the parameter list
         params.append(incs)
         # And report the time taken for the iteration.
@@ -227,3 +284,26 @@ def render_iteration(mm, id_ind, exp_ind, img_shape, camera, params,
         instance_i['instance_in_img'].as_colouredtrimesh())
 
     return rasterize_mesh(mesh_in_img_lit, img_shape).as_unmasked()
+
+
+def print_single_cost(k, c, tot):
+    if isinstance(c, tuple):
+        key = '{:03.0%} | {:>12}'.format((c[0] * c[1]) / tot, k)
+        val = '{:>12.2f} x {:>12.2f} = {:.2f}'.format(c[0], c[1], c[0] * c[1])
+    else:
+        key = '{:03.0%} | {:>12}'.format(c / tot, k)
+        val = '{:.2f}'.format(c)
+    print('{:>20}: {}'.format(key, val))
+
+
+def print_cost_dict(d):
+    print('------------------------------------------------------------------')
+    print_single_cost('total_energy', d['total_energy'], d['total_energy'])
+    print('------------------------------------------------------------------')
+    for k in ['err_f_tot', 'err_l_tot', 'err_s_id',
+              'err_s_exp', 'err_sm']:
+        print_single_cost(k, d[k], d['total_energy'])
+    print('------------------------------------------------------------------')
+    for k in ['err_f', 'err_l']:
+        print('{} (median over frames): {:.2f}'.format(k, np.median(d[k])))
+    print('------------------------------------------------------------------')
