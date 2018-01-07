@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import timedelta
+from menpo.transform import Scale
 from time import time
 
 import numpy as np
@@ -274,12 +275,10 @@ def render_iteration(mm, id_ind, exp_ind, img_shape, camera, params,
     c_i = params_i['cs'][img_index]
     p_i = params_i['p']
     q_i = params_i['qs'][img_index]
-    instance_i = instance_for_params(mm, id_ind, exp_ind, camera,
-                                     p_i, q_i, c_i)
-
-    mesh_in_img_lit = lambertian_shading(
-        instance_i['instance_in_img'].as_colouredtrimesh())
-
+    i_in_img = instance_for_params(mm, id_ind, exp_ind, camera,
+                                   p_i, q_i, c_i)['instance_in_img']
+    i_in_img = Scale([1, 1, 1/1e6]).apply(i_in_img)
+    mesh_in_img_lit = lambertian_shading(i_in_img.as_colouredtrimesh())
     return rasterize_mesh(mesh_in_img_lit, img_shape).as_unmasked()
 
 
