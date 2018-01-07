@@ -12,7 +12,7 @@ from ..algorithm.lk import camera_parameters_update
 from ..algorithm.lk.base import gradient_xy
 from ..algorithm.lk.projectout import project_out, sample_uv_terms
 from .hessian import (initialize_hessian_and_JTe, insert_frame_to_H,
-                      insert_frame_to_JTe, insert_frame_to_JTe_old)
+                      insert_frame_to_JTe)
 
 
 def J_data(camera, warped_uv, shape_pc_uv, U_tex_pc, grad_x_uv,
@@ -109,9 +109,10 @@ def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
 
 
 def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
-                         p, qs, cs, c_id=1, c_l=1, c_exp=1, c_sm=1,
+                         p, qs, cs,
+                         c_f=1, c_l=1, c_id=1, c_exp=1, c_sm=1,
                          lm_group=None, n_samples=1000, quirks_mode=False,
-                         compute_costs=False):
+                         compute_costs=True):
 
     n_frames = len(images)
     n_points = mm.shape_model.template_instance.n_points
@@ -156,11 +157,8 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
         j = jacobians(s, c, image, lms_points_xy, mm, id_indices, exp_indices,
                       template_camera, grad_x, grad_y, shape_pc, shape_pc_lms,
                       n_samples, compute_costs=compute_costs)
-        insert_frame_to_H(H, j, f, n_p, n_q, n_c, c_l, n_frames)
-        if quirks_mode:
-            insert_frame_to_JTe_old(JTe, j, f, n_p, n_q, n_c, c_l, n_frames)
-        else:
-            insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_l, n_frames)
+        insert_frame_to_H(H, j, f, n_p, n_q, n_c, c_f, c_l, n_frames)
+        insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_f, c_l, n_frames)
 
         if compute_costs:
             for cost, val in j['costs'].items():
@@ -202,7 +200,7 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
         # TODO confirm this weight isn't required here
         # err_sm = (((qs[:-2] - 2 * qs[1:-1] + qs[2:]) ** 2) * shape_var[exp_indices]).sum()
 
-        err_f_tot = c['err_f'].sum()
+        err_f_tot = c['err_f'].sum() * c_f / (n_c * n_samples)
         err_l_tot = c['err_l'].sum()
 
         total_energy = (err_f_tot +
@@ -225,9 +223,8 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
 
 
 def fit_video(images, mm, id_indices, exp_indices, template_camera,
-              p, qs, cs, c_id=1, c_l=1, c_exp=1, c_sm=1, lm_group=None,
-              n_samples=1000, n_iters=10, compute_costs=False,
-              quirks_mode=False):
+              p, qs, cs, c_f=1, c_l=1, c_id=1, c_exp=1, c_sm=1, lm_group=None,
+              n_samples=1000, n_iters=10, compute_costs=True):
     params = [
         {
             "p": p,
@@ -242,9 +239,9 @@ def fit_video(images, mm, id_indices, exp_indices, template_camera,
         t1 = time()
         incs = increment_parameters(images, mm, id_indices, exp_indices,
                                     template_camera, l['p'], l['qs'], l['cs'],
-                                    c_id=c_id, c_l=c_l, c_exp=c_exp, c_sm=c_sm,
+                                    c_f=c_f, c_l=c_l, c_id=c_id, c_exp=c_exp,
+                                    c_sm=c_sm,
                                     lm_group=lm_group, n_samples=n_samples,
-                                    quirks_mode=quirks_mode,
                                     compute_costs=compute_costs)
         # update the parameter list
         params.append(incs)

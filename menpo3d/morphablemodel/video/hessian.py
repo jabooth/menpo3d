@@ -78,16 +78,21 @@ def initialize_hessian_and_JTe(c_id, c_exp, c_sm, n_p, n_q, n_c, p, qs,
 
 # -------------------------- PER-FRAME UPDATES  ------------------------------ #
 
-def insert_frame_to_H(H, j, f, n_p, n_q, n_c, c_l, n_frames):
+def insert_frame_to_H(H, j, f, n_p, n_q, n_c, c_f, c_l, n_frames):
 
-    pp = j['J_f_p'].T @ j['J_f_p'] + c_l * j['J_l_p'].T @ j['J_l_p']
-    qq = j['J_f_q'].T @ j['J_f_q'] + c_l * j['J_l_q'].T @ j['J_l_q']
-    cc = j['J_f_c'].T @ j['J_f_c'] + c_l * j['J_l_c'].T @ j['J_l_c']
+    # normalize data term contributions by n_channels x n_pixels
+    # otherwise scales of all other constants need to be n_channels x n_pixels
+    # to compensate
+    c_f = c_f / j['J_f_p'].shape[0]
 
-    pq = j['J_f_p'].T @ j['J_f_q'] + c_l * j['J_l_p'].T @ j['J_l_q']
-    pc = j['J_f_p'].T @ j['J_f_c'] + c_l * j['J_l_p'].T @ j['J_l_c']
+    pp = c_f * j['J_f_p'].T @ j['J_f_p'] + c_l * j['J_l_p'].T @ j['J_l_p']
+    qq = c_f * j['J_f_q'].T @ j['J_f_q'] + c_l * j['J_l_q'].T @ j['J_l_q']
+    cc = c_f * j['J_f_c'].T @ j['J_f_c'] + c_l * j['J_l_c'].T @ j['J_l_c']
 
-    qc = j['J_f_q'].T @ j['J_f_c'] + c_l * j['J_l_q'].T @ j['J_l_c']
+    pq = c_f * j['J_f_p'].T @ j['J_f_q'] + c_l * j['J_l_p'].T @ j['J_l_q']
+    pc = c_f * j['J_f_p'].T @ j['J_f_c'] + c_l * j['J_l_p'].T @ j['J_l_c']
+
+    qc = c_f * j['J_f_q'].T @ j['J_f_c'] + c_l * j['J_l_q'].T @ j['J_l_c']
 
     # Find the right offset into the Hessian for Q/C (which are per-frame
     # terms). Note that p terms always sum, so no per-frame offset needed.
@@ -111,11 +116,16 @@ def insert_frame_to_H(H, j, f, n_p, n_q, n_c, c_l, n_frames):
     H[offset_c:offset_c + n_c, offset_q:offset_q + n_q] += qc.T
 
 
-def insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_l, n_frames):
+def insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_f, c_l, n_frames):
 
-    JTe_p = j['J_f_p'].T @ j['e_f'] + c_l * j['J_l_p'].T @ j['e_l']
-    JTe_q = j['J_f_q'].T @ j['e_f'] + c_l * j['J_l_q'].T @ j['e_l']
-    JTe_c = j['J_f_c'].T @ j['e_f'] + c_l * j['J_l_c'].T @ j['e_l']
+    # normalize data term contributions by n_channels x n_pixels
+    # otherwise scales of all other constants need to be n_channels x n_pixels
+    # to compensate
+    c_f = c_f / j['J_f_p'].shape[0]
+
+    JTe_p = c_f * j['J_f_p'].T @ j['e_f'] + c_l * j['J_l_p'].T @ j['e_l']
+    JTe_q = c_f * j['J_f_q'].T @ j['e_f'] + c_l * j['J_l_q'].T @ j['e_l']
+    JTe_c = c_f * j['J_f_c'].T @ j['e_f'] + c_l * j['J_l_c'].T @ j['e_l']
 
     JTe[:n_p] += JTe_p
 
@@ -124,19 +134,3 @@ def insert_frame_to_JTe(JTe, j, f, n_p, n_q, n_c, c_l, n_frames):
 
     offset_c = n_p + n_frames * n_q + f * n_c
     JTe[offset_c:offset_c + n_c] += JTe_c
-
-
-
-def insert_frame_to_JTe_old(JTe, j, f, n_p, n_q, n_c, c_l, n_frames):
-
-    JTe_p = c_l * j['J_l_p'].T @ j['e_l']
-    JTe_q = c_l * j['J_l_q'].T @ j['e_l']
-    JTe_c = c_l * j['J_l_c'].T @ j['e_l']
-
-    JTe[:n_p] = JTe_p
-
-    offset_q = n_p + f * n_q
-    JTe[offset_q:offset_q + n_q] = JTe_q
-
-    offset_c = n_p + n_frames * n_q + f * n_c
-    JTe[offset_c:offset_c + n_c] = JTe_c
