@@ -55,7 +55,7 @@ def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
               grad_x, grad_y, shape_pc, shape_pc_lms, n_samples,
               compute_costs=False):
 
-    instance = mm.shape_model.instance(s)
+    instance = mm.shape_model.instance(s, normalized_weights=True)
     camera = template_camera.from_vector(c)
 
     (instance_w, instance_in_image, warped_uv, img_error_uv,
@@ -254,7 +254,7 @@ def instance_for_params(mm, id_ind, exp_ind, template_camera, p, q,
     shape_params = np.zeros(mm.shape_model.n_active_components)
     shape_params[id_ind] = p
     shape_params[exp_ind] = q
-    instance = mm.shape_model.instance(shape_params)
+    instance = mm.shape_model.instance(shape_params, normalized_weights=True)
     camera = template_camera.from_vector(c)
     instance_in_img = camera.apply(instance)
     return {
