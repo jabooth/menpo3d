@@ -15,7 +15,7 @@ def insert_exp_constraint(H, c_exp, n_p, n_q, n_frames):
     j_offset = n_p
 
     size = n_q * n_frames
-    exp_const = np.diag(np.repeat(c_exp, n_frames))
+    exp_const = np.diag(np.repeat(c_exp, size))
     H[i_offset:i_offset + size, j_offset:j_offset + size] = exp_const
 
 
@@ -35,7 +35,7 @@ def insert_id_constraint_to_JTe(JTe, p, c_id, n_p):
 
 def insert_exp_constraint_to_JTe(JTe, qs, c_exp, n_p, n_q, n_frames):
     size = n_q * n_frames
-    JTe[n_p:n_p + size] += - np.tile(c_exp, n_frames)  * qs.ravel()
+    JTe[n_p:n_p + size] += - c_exp * qs.ravel()
 
 
 def insert_smoothness_constraint_to_JTe(JTe, qs, c_sm, n_p, n_q, n_frames):

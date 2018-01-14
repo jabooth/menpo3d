@@ -112,17 +112,11 @@ def jacobians(s, c, image, lms_points_xy, mm, id_ind, exp_ind, template_camera,
 def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
                          p, qs, cs,
                          c_f=1, c_l=1, c_id=1, c_exp=1, c_sm=1,
-                         lm_group=None, n_samples=1000, quirks_mode=False,
+                         lm_group=None, n_samples=1000,
                          compute_costs=True):
 
     n_frames = len(images)
     n_points = mm.shape_model.template_instance.n_points
-
-    # weight the provided constants by the std.dev of the relevant component
-    shape_var = 1 / mm.shape_model.eigenvalues
-    c_id_w = c_id * shape_var[id_indices]
-    c_exp_w = c_exp * shape_var[exp_indices]
-    # we now only pass through the weighted (_w) variants.
     n_p = len(id_indices)
     n_q = len(exp_indices)
     n_c = cs.shape[1] - 2  # sub one for quaternion, one for focal length
@@ -130,11 +124,16 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
     print('Precomputing....')
     # Rescale shape components to have size:
     # n_points x (n_components * n_dims)
-    shape_pc = mm.shape_model.components.T.reshape([n_points, -1])
+    # and to be scaled by the relevant standard deviation.
+    shape_pc = (
+            mm.shape_model.components.T *
+            np.sqrt(mm.shape_model.eigenvalues)
+    ).reshape([n_points, -1])
+    # include std.dev in principal components
     shape_pc_lms = shape_pc.reshape([n_points, 3, -1])[mm.model_landmarks_index]
 
     print('Initializing Hessian/JTe for frame...')
-    H, JTe = initialize_hessian_and_JTe(c_id_w, c_exp_w, c_sm, n_p, n_q, n_c, p, qs,
+    H, JTe = initialize_hessian_and_JTe(c_id, c_exp, c_sm, n_p, n_q, n_c, p, qs,
                                         n_frames)
     print('H: {} ({})'.format(H.shape, bytes_str(H.nbytes)))
 
@@ -195,11 +194,9 @@ def increment_parameters(images, mm, id_indices, exp_indices, template_camera,
     if compute_costs:
         c = {k: np.array(v) for k, v in costs.items()}
 
-        err_s_id = ((p ** 2) * shape_var[id_indices]).sum()
-        err_s_exp = ((qs ** 2) * shape_var[exp_indices]).sum()
+        err_s_id = (p ** 2).sum()
+        err_s_exp = (qs ** 2).sum()
         err_sm = ((qs[:-2] - 2 * qs[1:-1] + qs[2:]) ** 2).sum()
-        # TODO confirm this weight isn't required here
-        # err_sm = (((qs[:-2] - 2 * qs[1:-1] + qs[2:]) ** 2) * shape_var[exp_indices]).sum()
 
         err_f_tot = c['err_f'].sum() * c_f / (n_c * n_samples)
         err_l_tot = c['err_l'].sum()
