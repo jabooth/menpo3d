@@ -279,6 +279,20 @@ def render_iteration(mm, id_ind, exp_ind, img_shape, camera, params,
     return rasterize_mesh(mesh_in_img_lit, img_shape).as_unmasked()
 
 
+def render_initialization(images, mm, id_indices, exp_indices, template_camera,
+                          p, qs, cs, img_index):
+    from lsfm.visualize import lambertian_shading
+    from menpo3d.rasterize import rasterize_mesh
+    c_i = cs[img_index]
+    q_i = qs[img_index]
+    i_in_img = instance_for_params(mm, id_indices, exp_indices,
+                                   template_camera,
+                                   p, q_i, c_i)['instance_in_img']
+    i_in_img = Scale([1, 1, 1/1e6]).apply(i_in_img)
+    mesh_in_img_lit = lambertian_shading(i_in_img.as_colouredtrimesh())
+    return rasterize_mesh(mesh_in_img_lit, images[0].shape).as_unmasked()
+
+
 def print_single_cost(k, c, tot):
     if isinstance(c, tuple):
         key = '{:03.0%} | {:>12}'.format((c[0] * c[1]) / tot, k)
