@@ -249,6 +249,18 @@ def fit_video(images, mm, id_indices, exp_indices, template_camera,
     return params
 
 
+def fit_image(image, mm, id_indices, exp_indices, template_camera,
+              p, q, c, c_f=1, c_l=1, c_id=1, c_exp=1, lm_group=None,
+              n_samples=1000, n_iters=10, compute_costs=True):
+    # fit image is the same as fit_video, just for a single length video.
+    return fit_video(
+        [image], mm, id_indices, exp_indices, template_camera,
+        p, q[None, :], c[None, :], c_f=c_f, c_l=c_l,
+        c_id=c_id, c_exp=c_exp, c_sm=0, lm_group=lm_group,
+        n_samples=n_samples, n_iters=n_iters, compute_costs=compute_costs
+    )
+
+
 def instance_for_params(mm, id_ind, exp_ind, template_camera, p, q,
                         c):
     shape_params = np.zeros(mm.shape_model.n_active_components)
