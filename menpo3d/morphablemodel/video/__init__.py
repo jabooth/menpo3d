@@ -286,7 +286,9 @@ def render_iteration(mm, id_ind, exp_ind, img_shape, camera, params,
     q_i = params_i['qs'][img_index]
     i_in_img = instance_for_params(mm, id_ind, exp_ind, camera,
                                    p_i, q_i, c_i)['instance_in_img']
-    i_in_img = Scale([1, 1, 1/1e6]).apply(i_in_img)
+    [x_r, y_r, z_r] = i_in_img.range()
+    av_xy_r = (x_r + y_r) / 2.0
+    i_in_img = Scale([1, 1, av_xy_r / z_r]).apply(i_in_img)
     mesh_in_img_lit = lambertian_shading(i_in_img.as_colouredtrimesh())
     return rasterize_mesh(mesh_in_img_lit, img_shape).as_unmasked()
 
