@@ -1,4 +1,6 @@
 import numpy as np
+from menpo.transform import Scale
+
 from menpo3d.rasterize import GLRasterizer, model_to_clip_transform
 from menpo.shape import PointCloud
 
@@ -16,6 +18,14 @@ def render_hi_res_shape_image(mesh, render_width=3000):
 
 def per_vertex_occlusion(mesh, err_proportion=0.0001, err_norm='z', render_width=3000):
     # Render a high-resolution shape image for visibility testing
+
+    # z scale can be very large for high focal lengths.
+    # ensure z is scaled to match x/y for the purposes of masking.
+    print('scaling down ')
+    [x_r, y_r, z_r] = mesh.range()
+    av_xy_r = (x_r + y_r) / 2.0
+    mesh = Scale([1, 1, av_xy_r / z_r]).apply(mesh)
+
     model_to_image_transform, shape_image = render_hi_res_shape_image(mesh, render_width=render_width)
     # err_proportion=0.01 is 1% deviation of total range of 3D shape
     err_scale = mesh.range()[2].sum() if err_norm == 'z' else np.sqrt(
