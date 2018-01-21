@@ -302,7 +302,9 @@ def render_initialization(images, mm, id_indices, exp_indices, template_camera,
     i_in_img = instance_for_params(mm, id_indices, exp_indices,
                                    template_camera,
                                    p, q_i, c_i)['instance_in_img']
-    i_in_img = Scale([1, 1, 1/1e6]).apply(i_in_img)
+    [x_r, y_r, z_r] = i_in_img.range()
+    av_xy_r = (x_r + y_r) / 2.0
+    i_in_img = Scale([1, 1, av_xy_r / z_r]).apply(i_in_img)
     mesh_in_img_lit = lambertian_shading(i_in_img.as_colouredtrimesh())
     return rasterize_mesh(mesh_in_img_lit, images[0].shape).as_unmasked()
 
