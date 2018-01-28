@@ -341,7 +341,8 @@ def generate_person_specific_texture_model(images, mm, id_ind, exp_ind,
                                            template_camera, p, qs, cs,
                                            lambda_=0.01,
                                            n_components=0.99):
-    n_features = mm.n_channels * mm.n_vertices
+    n_channels = images[0].n_channels
+    n_features = n_channels * mm.n_vertices
     n_samples = len(images)
     X = np.empty((n_samples, n_features), dtype=mm.texture_model.mean().dtype)
     M = np.empty_like(X, dtype=np.bool)
@@ -351,7 +352,7 @@ def generate_person_specific_texture_model(images, mm, id_ind, exp_ind,
                                        template_camera,
                                        p, q, c)['instance_in_img']
         features, mask = extract_per_vertex_colour_with_occlusion(i_in_img, img)
-        mask_repeated = np.repeat(mask.ravel(), mm.n_channels)
+        mask_repeated = np.repeat(mask.ravel(), n_channels)
         X[i] = features.ravel()
         M[i] = mask_repeated.ravel()
         print(mask.sum() / mask.shape[0])
