@@ -1,11 +1,15 @@
 import numpy as np
 from menpo.transform import Scale
 
-from menpo3d.rasterize import GLRasterizer, model_to_clip_transform
+from menpo3d.rasterize import (
+    rasterize_shape_image_from_barycentric_coordinate_images,
+    rasterize_barycentric_coordinate_images
+)
 from menpo.shape import PointCloud
 
 
 def render_hi_res_shape_image(mesh, render_width=3000):
+    from menpo3d.rasterize import GLRasterizer
     h, w = mesh.range()[:2]
     aspect_ratio = w / h
     height = render_width * aspect_ratio
@@ -16,7 +20,33 @@ def render_hi_res_shape_image(mesh, render_width=3000):
     return r.model_to_image_transform, r.rasterize_mesh_with_shape_image(mesh)[1]
 
 
-def per_vertex_occlusion(mesh, err_proportion=0.0001, err_norm='z', render_width=3000):
+def per_vertex_occlusion(mesh_in_img, err_proportion=0.0001, render_diag=600):
+
+    [x_r, y_r, z_r] = mesh_in_img.range()
+    av_xy_r = (x_r + y_r) / 2.0
+
+    rescale = render_diag / np.sqrt((mesh_in_img.range()[:2] ** 2).sum())
+    rescale_z = av_xy_r / z_r
+
+    mesh = Scale([rescale, rescale, rescale * rescale_z]).apply(mesh_in_img)
+    mesh.points[...] = mesh.points - mesh.points.min(axis=0)
+    mesh.points[:, :2] = mesh.points[:, :2] + 2
+    shape = np.round(mesh.points.max(axis=0)[:2] + 2)
+
+    bc, ti = rasterize_barycentric_coordinate_images(mesh, shape)
+    si = rasterize_shape_image_from_barycentric_coordinate_images(mesh.as_colouredtrimesh(), bc, ti)
+
+    # err_proportion=0.01 is 1% deviation of total range of 3D shape
+    threshold = render_diag * err_proportion
+    xyz_found = si.as_unmasked().sample(mesh.with_dims([0, 1]), order=1).T
+    err = np.sum((xyz_found - mesh.points) ** 2, axis=1)
+
+    visible = err < threshold
+    return visible
+
+
+def per_vertex_occlusion_gl_rasterizer(mesh, err_proportion=0.0001,
+                                       err_norm='z', render_width=3000):
     # Render a high-resolution shape image for visibility testing
 
     # z scale can be very large for high focal lengths.
@@ -90,9 +120,13 @@ def extract_per_vertex_colour(mesh, image):
     return image.sample(PointCloud(mesh.points[:, :2])).T
 
 
-def extract_per_vertex_colour_with_occlusion(mesh, image, render_width=3000):
+def extract_per_vertex_colour_with_occlusion(mesh, image,
+                                             err_proportion=0.0001,
+                                             render_diag=600):
     colours = extract_per_vertex_colour(mesh, image)
-    mask = per_vertex_occlusion(mesh, render_width=render_width)
+    mask = per_vertex_occlusion(mesh,
+                                err_proportion=err_proportion,
+                                render_diag=render_diag)
     return colours, mask
 
 
