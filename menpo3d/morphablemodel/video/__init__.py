@@ -1,11 +1,16 @@
 from collections import defaultdict
 from datetime import timedelta
+
+from menpo.math.decomposition import rpca_missing
+from menpo.model import PCAVectorModel
+
 from menpo.transform import Scale
 from time import time
 
 import numpy as np
 import scipy.sparse as sp
 from menpo.visualize import print_progress, bytes_str
+from menpo3d.extractimage import extract_per_vertex_colour_with_occlusion
 
 from ..algorithm.derivatives import (d_camera_d_shape_parameters,
                                      d_camera_d_camera_parameters)
@@ -330,3 +335,29 @@ def print_cost_dict(d):
     for k in ['err_f', 'err_l']:
         print('{} (median over frames): {:.2f}'.format(k, np.median(d[k])))
     print('------------------------------------------------------------------')
+
+
+def generate_person_specific_texture_model(images, mm, id_ind, exp_ind,
+                                           template_camera, p, qs, cs,
+                                           lambda_=0.01,
+                                           n_components=0.99):
+    n_features = mm.n_channels * mm.n_vertices
+    n_samples = len(images)
+    X = np.empty((n_samples, n_features), dtype=mm.texture_model.mean().dtype)
+    M = np.empty_like(X, dtype=np.bool)
+
+    for i, (img, q, c) in enumerate(zip(print_progress(images), qs, cs)):
+        i_in_img = instance_for_params(mm, id_ind, exp_ind,
+                                       template_camera,
+                                       p, q, c)['instance_in_img']
+        features, mask = extract_per_vertex_colour_with_occlusion(i_in_img, img)
+        mask_repeated = np.repeat(mask.ravel(), mm.n_channels)
+        X[i] = features.ravel()
+        M[i] = mask_repeated.ravel()
+        print(mask.sum() / mask.shape[0])
+
+    A, E = rpca_missing(X, M, verbose=True, lambda_=lambda_)
+    model = PCAVectorModel(A, inplace=True)
+    model.trim_components(n_components=n_components)
+
+    return model, X, M
