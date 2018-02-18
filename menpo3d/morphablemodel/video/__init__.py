@@ -1,15 +1,15 @@
 from collections import defaultdict
 from datetime import timedelta
-
-from menpo.math.decomposition import rpca_missing
-from menpo.model import PCAVectorModel
-
-from menpo.transform import Scale
 from time import time
 
 import numpy as np
 import scipy.sparse as sp
+
+from menpo.math.decomposition import rpca_missing
+from menpo.model import PCAVectorModel
+from menpo.transform import Scale
 from menpo.visualize import print_progress, bytes_str
+
 from menpo3d.extractimage import extract_per_vertex_colour_with_occlusion
 
 from ..algorithm.derivatives import (d_camera_d_shape_parameters,
@@ -17,6 +17,7 @@ from ..algorithm.derivatives import (d_camera_d_shape_parameters,
 from ..algorithm.lk import camera_parameters_update
 from ..algorithm.lk.base import gradient_xy
 from ..algorithm.lk.projectout import project_out, sample_uv_terms
+
 from .hessian import (initialize_hessian_and_JTe, insert_frame_to_H,
                       insert_frame_to_JTe)
 

@@ -70,7 +70,6 @@ def initialize_hessian_and_JTe(c_id, c_exp, c_sm, n_p, n_q, n_c, p, qs,
     insert_id_constraint_to_JTe(JTe, p, c_id, n_p)
     insert_exp_constraint_to_JTe(JTe, qs, c_exp, n_p, n_q, n_frames)
 
-
     if n_frames >= 3:
         insert_smoothness_constraint_to_JTe(JTe, qs, c_sm, n_p, n_q, n_frames)
     return H, JTe
